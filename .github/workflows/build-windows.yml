@@ -1,0 +1,34 @@
+name: Build Windows binary
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build
+        run: go build -o hamlab-bridge.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamlab-bridge-windows
+          path: hamlab-bridge.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hamlab-bridge.exe
