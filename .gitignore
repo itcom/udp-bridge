@@ -1,0 +1,16 @@
+
+
+# Runtime files
+config.json
+qrz_cache.json
+
+# Binaries
+hamlab-bridge
+hamlab-bridge.exe
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
