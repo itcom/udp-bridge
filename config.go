@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -24,7 +25,7 @@ var (
 // If the file exists, it is unmarshaled into JSON and the configuration is updated.
 // If there is an error unmarshaling the JSON, the configuration is left unchanged.
 func loadConfig() {
-	b, err := os.ReadFile("config.json")
+	b, err := os.ReadFile(ConfigPath())
 	if err == nil {
 		_ = json.Unmarshal(b, &config)
 	}
@@ -35,5 +36,9 @@ func loadConfig() {
 // writes it to the file with permissions 0600.
 func saveConfig() {
 	b, _ := json.MarshalIndent(config, "", "  ")
-	_ = os.WriteFile("config.json", b, 0600)
+	_ = os.WriteFile(ConfigPath(), b, 0600)
+}
+
+func ConfigPath() string {
+	return filepath.Join(appDataDir(), "config.json")
 }

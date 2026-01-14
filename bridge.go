@@ -61,6 +61,7 @@ func broadcast(msg string) {
 // The WebSocket server listens for incoming WSJT-X/JTDX messages and broadcasts them to connected WebSocket clients.
 // The UDP server listens for incoming WSJT-X/JTDX messages and broadcasts them to connected WebSocket clients.
 func startBridge() {
+	log.Println("App data dir:", appDataDir())
 	go func() {
 		http.HandleFunc("/ws", wsHandler)
 		log.Println("WebSocket :127.0.0.1:17800/ws")

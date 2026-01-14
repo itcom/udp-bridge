@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,10 @@ type qrzCache struct {
 	mu   sync.RWMutex
 	data map[string]*qrzCacheEntry
 	ttl  time.Duration
+}
+
+func qrzCachePath() string {
+	return filepath.Join(appDataDir(), qrzCacheFile)
 }
 
 // newQRZCache returns a new qrzCache with the given time-to-live (TTL).
@@ -39,7 +44,7 @@ func newQRZCache(ttl time.Duration) *qrzCache {
 // If there is an error reading the file, it returns immediately.
 // If there is an error unmarshaling the JSON, it also returns immediately.
 func (c *qrzCache) load() {
-	b, err := os.ReadFile(qrzCacheFile)
+	b, err := os.ReadFile(qrzCachePath())
 	if err != nil {
 		return
 	}
@@ -54,7 +59,7 @@ func (c *qrzCache) save() {
 	defer c.mu.RUnlock()
 
 	b, _ := json.MarshalIndent(c.data, "", "  ")
-	_ = os.WriteFile(qrzCacheFile, b, 0644)
+	_ = os.WriteFile(qrzCachePath(), b, 0644)
 }
 
 // get retrieves the QRZ data for the given call from the cache.
