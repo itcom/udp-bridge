@@ -22,6 +22,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(
             NSMenuItem(
+                title: "設定を開く",
+                action: #selector(openSettings),
+                keyEquivalent: ","
+            ))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(
+            NSMenuItem(
+                title: "再起動",
+                action: #selector(restartBridge),
+                keyEquivalent: "r"
+            ))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(
+            NSMenuItem(
                 title: "HAMLAB Bridge 終了",
                 action: #selector(quit),
                 keyEquivalent: "q"
@@ -42,6 +56,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             NSLog("Failed to start hamlab-bridge: \(error)")
         }
+    }
+
+    @objc func openSettings() {
+        if let url = URL(string: "http://127.0.0.1:17801/settings") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc func restartBridge() {
+        bridgeProcess?.terminate()
+        bridgeProcess?.waitUntilExit()
+        startBridge()
     }
 
     @objc func quit() {
