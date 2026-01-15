@@ -21,3 +21,8 @@ build/
 dist/
 dmg/
 icon-work/icon.icns
+
+# Swift Package Manager
+.build/
+Package.swift
+
