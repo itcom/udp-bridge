@@ -16,6 +16,7 @@ func main() {
 	go startWebUI()
 	log.Println("Settings UI: http://127.0.0.1:17801/settings")
 
+	setupLaunchAgent()
 	startBridge()
 }
 

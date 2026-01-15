@@ -1,0 +1,44 @@
+name: Build macOS binary
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Go binaries
+        run: |
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o build/hamlab-bridge-amd64
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o build/hamlab-bridge-arm64
+
+      - name: Create Universal binary
+        run: |
+          lipo -create \
+            build/hamlab-bridge-amd64 \
+            build/hamlab-bridge-arm64 \
+            -output build/hamlab-bridge
+
+      - name: Build Swift menubar app
+        run: |
+          swiftc main.swift AppDelegate.swift -o hamlab-menubar
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamlab-bridge-macos-universal
+          path: |
+            build/hamlab-bridge
+            hamlab-menubar

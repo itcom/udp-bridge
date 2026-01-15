@@ -8,6 +8,7 @@ qrz_cache.json
 hamlab-bridge
 hamlab-bridge.exe
 HAMLAB-Bridge-0.1.0.dmg
+hamlab-menubar
 
 # OS
 .DS_Store
@@ -16,6 +17,7 @@ HAMLAB-Bridge-0.1.0.dmg
 .vscode/
 .idea/
 
+build/
 dist/
 dmg/
-icon-work/icon.iconset/
+icon-work/icon.icns
