@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net"
-	"net/http"
-
-	"github.com/gorilla/websocket"
 
 	"regexp"
 
@@ -18,55 +15,12 @@ var reGrid = regexp.MustCompile(`(?i)<gridsquare:\d+>([A-Za-z0-9]+)`)
 var reCall = regexp.MustCompile(`(?i)<call:\d+>([A-Za-z0-9/]+)`)
 var reQSODate = regexp.MustCompile(`(?i)<qso_date:\d+>(\d{8})`)
 
-var clients = map[*websocket.Conn]bool{}
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
 var qrzc = newQRZCache(24 * time.Hour)
-
-type Payload struct {
-	Adif string `json:"adif"`
-
-	QRZ *struct {
-		QTH      string `json:"qth"`
-		Grid     string `json:"grid"`
-		Operator string `json:"operator"`
-	} `json:"qrz,omitempty"`
-
-	Geo *struct {
-		JCC string `json:"jcc"`
-	} `json:"geo,omitempty"`
-}
-
-// wsHandler handles WebSocket connections. It upgrades the HTTP request to a WebSocket connection and adds the connection to the set of connected clients.
-func wsHandler(w http.ResponseWriter, r *http.Request) {
-	c, _ := upgrader.Upgrade(w, r, nil)
-	clients[c] = true
-}
-
-// broadcast sends a message to all connected WebSocket clients.
-// If writing to a client fails, the client is removed from the set of connected clients and closed.
-func broadcast(msg string) {
-	for c := range clients {
-		if err := c.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-			delete(clients, c)
-			c.Close()
-		}
-	}
-}
 
 // startBridge starts the HAMLAB Bridge. It starts a WebSocket server on localhost:17800 and a UDP server on localhost:2333.
 // The WebSocket server listens for incoming WSJT-X/JTDX messages and broadcasts them to connected WebSocket clients.
 // The UDP server listens for incoming WSJT-X/JTDX messages and broadcasts them to connected WebSocket clients.
 func startBridge() {
-	log.Println("App data dir:", appDataDir())
-	go func() {
-		http.HandleFunc("/ws", wsHandler)
-		log.Println("WebSocket :127.0.0.1:17800/ws")
-		http.ListenAndServe("127.0.0.1:17800", nil)
-	}()
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:2333")
 	conn, _ := net.ListenUDP("udp", addr)
@@ -143,7 +97,8 @@ func startBridge() {
 			jcc, _ = geoLookup(finalGrid)
 		}
 
-		payload := Payload{
+		payload := ADIFEvent{
+			Type: "adif",
 			Adif: adif,
 		}
 
