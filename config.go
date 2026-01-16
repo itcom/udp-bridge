@@ -13,6 +13,11 @@ type Config struct {
 
 	UseQRZ bool `json:"use_qrz"`
 	UseGeo bool `json:"use_geo"`
+
+	UseRig  bool   `json:"use_rig"`
+	RigPort string `json:"rig_port"`
+	RigBaud int    `json:"rig_baud"`
+	UsePTY  bool   `json:"use_pty"`
 }
 
 var (
@@ -28,6 +33,10 @@ func loadConfig() {
 	b, err := os.ReadFile(ConfigPath())
 	if err == nil {
 		_ = json.Unmarshal(b, &config)
+	}
+
+	if config.RigBaud == 0 {
+		config.RigBaud = 9600
 	}
 }
 
