@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"log"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -79,8 +80,8 @@ func startRigWatcher() {
 	selectedIndex := config.SelectedRigIndex
 	configLock.RUnlock()
 
-	// PTYモードの場合は別関数へ
-	if usePTY {
+	// PTYモードの場合は別関数へ（macOS/Linuxのみ）
+	if usePTY && (runtime.GOOS == "darwin" || runtime.GOOS == "linux") {
 		startRigWatcherWithPTY()
 		return
 	}
