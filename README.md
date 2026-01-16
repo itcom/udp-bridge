@@ -9,7 +9,7 @@ WSJT-X / JTDX から送信される UDP ADIF データを受信し、WebSocket �
 ```
 WSJT-X / JTDX
     ↓ UDP ADIF
-HAMLAB Bridge（ローカル常駐）← 無線機（CAT / CI-V）
+HAMLAB Bridge（ローカル常駐）← 無線機（CAT / CI-V）× 複数台対応
     ↓ WebSocket / JSON
 ブラウザ（HAMLAB）
     ↓
@@ -27,8 +27,11 @@ HAMLAB Bridge（ローカル常駐）← 無線機（CAT / CI-V）
 - **無線機連携（CAT / CI-V）**
   - 周波数・モード取得
   - YAESU CAT / ICOM CI-V 自動判別
+  - **複数無線機の同時接続対応**
+  - AI1（Auto Information）モードによる自動更新
 - **PTY ルーター**（macOS / Linux）
   - 無線機ポートを WSJT-X 等と共有
+  - 各無線機に個別の PTY を割り当て
 - 設定用 Web UI
 - メニューバー常駐（macOS）
 
@@ -92,6 +95,8 @@ macOS 向け DMG 作成：
 - QRZ.com ユーザー名 / パスワード
 - QRZ.com 連携の ON/OFF
 - JCC / 住所補完の ON/OFF
+- ブロードキャストモード（all / single）
+- 選択中の無線機
 
 ## WSJT-X / JTDX の設定
 
@@ -113,6 +118,26 @@ macOS 向け DMG 作成：
 | YAESU | CAT | FT-991A, FT-710 等 |
 | KENWOOD | CAT | TS-590 等 |
 
+### 複数無線機の同時接続
+
+最大4台の無線機を同時に接続できます。各無線機のポートとボーレートを個別に設定してください。
+
+#### ブロードキャストモード
+
+| モード | 動作 |
+|--------|------|
+| all | すべての無線機から受信したデータを配信 |
+| single | 選択した1台の無線機のみ配信 |
+
+- **all モード**: 複数の無線機を切り替えながら運用する場合に便利です。最後に操作した無線機の情報が配信されます。
+- **single モード**: 特定の無線機のみをモニターしたい場合に使用します。
+
+### AI1（Auto Information）モード
+
+YAESU / KENWOOD の CAT プロトコルでは、AI1 コマンドにより無線機側から自動的に周波数・モード情報が送信されます。これにより、ポーリングなしでリアルタイムに状態を取得できます。
+
+> **Note**: 一部の旧機種では AI1 に対応していない場合があります。
+
 ### PTY ルーター（macOS / Linux）
 
 通常、シリアルポートは1つのアプリケーションしか開けませんが、PTY ルーターを有効にすると仮想ポートが作成され、WSJT-X 等と同時に使用できます。
@@ -120,6 +145,17 @@ macOS 向け DMG 作成：
 1. 設定画面で「PTYルーター」にチェック
 2. 表示される PTY パス（例: `/dev/ttys003`）を WSJT-X の CAT 設定に入力
 3. HAMLAB Bridge と WSJT-X で同時に周波数・モードを取得可能
+
+#### 複数無線機での PTY
+
+複数の無線機を接続している場合、各無線機に個別の PTY パスが割り当てられます。
+
+```
+無線機1 (/dev/cu.usbserial-A) → PTY: /dev/ttys003
+無線機2 (/dev/cu.usbserial-B) → PTY: /dev/ttys004
+```
+
+それぞれの PTY パスを異なる WSJT-X インスタンスに設定することで、複数の無線機を独立して運用できます。
 
 > **Note**: PTY ルーターは macOS / Linux でのみ利用可能です。
 
@@ -159,7 +195,7 @@ WebSocket では以下の JSON を配信します。
 ```json
 {
   "type": "rig",
-  "rig": "ICOM",
+  "rig": "CAT",
   "freq": 14074000,
   "mode": "USB",
   "data": true
@@ -168,12 +204,16 @@ WebSocket では以下の JSON を配信します。
 
 ### PTY パス通知
 
+複数無線機接続時は配列で通知されます。
+
 ```json
 {
   "type": "pty",
-  "path": "/dev/ttys003"
+  "paths": ["/dev/ttys003", "/dev/ttys004", "", ""]
 }
 ```
+
+> 空文字は未接続のスロットを示します。
 
 ## トラブルシューティング
 
@@ -194,6 +234,11 @@ xattr -cr /Applications/HAMLAB\ Bridge.app
 
 - 他のアプリが同じポートを使用していないか確認
 - PTY ルーターを有効にすると複数アプリで共有可能
+
+### 複数無線機で混信する
+
+- ブロードキャストモードを「single」に変更し、モニターしたい無線機を選択
+- 各無線機のボーレートが正しく設定されているか確認
 
 ### QRZ がヒットしない
 
