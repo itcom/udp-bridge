@@ -15,9 +15,9 @@ func main() {
 	loadConfig()
 
 	go startWebUI()
-	log.Println("Settings UI: http://127.0.0.1:17801/settings")
 
 	setupLaunchAgent()
+	go startWebSocket()
 	go startBridge()
 	go startRigWatcher()
 

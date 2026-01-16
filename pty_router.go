@@ -1,5 +1,5 @@
-//go:build darwin
-// +build darwin
+//go:build darwin || linux
+// +build darwin linux
 
 package main
 
@@ -113,6 +113,20 @@ func startRigWatcherWithPTY() {
 		protoMu.Unlock()
 	}()
 
+	// PTY書き込み用チャネル（ブロック防止）
+	ptyWriteChan := make(chan []byte, 100)
+
+	// Goroutine: PTY書き込みワーカー
+	go func() {
+		for data := range ptyWriteChan {
+			_, err := ptmx.Write(data)
+			if err != nil {
+				log.Println("[RIG-PTY] PTY write error:", err)
+				return
+			}
+		}
+	}()
+
 	// Goroutine: PTY → realCOM (commands from WSJT-X to rig)
 	go func() {
 		buf := make([]byte, 256)
@@ -151,11 +165,13 @@ func startRigWatcherWithPTY() {
 		data := buf[:n]
 		// log.Printf("[RIG-PTY] COM→PTY %d bytes: % X", n, data)
 
-		// Forward to PTY (pass-through)
-		_, err = ptmx.Write(data)
-		if err != nil {
-			log.Println("[RIG-PTY] PTY write error:", err)
-			return
+		// Forward to PTY (pass-through, non-blocking)
+		dataCopy := make([]byte, n)
+		copy(dataCopy, data)
+		select {
+		case ptyWriteChan <- dataCopy:
+		default:
+			// バッファフル時は破棄（COMの読み取りをブロックしない）
 		}
 
 		// Analyze data (mirror mode - same as direct connection)

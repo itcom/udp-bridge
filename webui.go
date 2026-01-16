@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"runtime"
 	"strconv"
 )
 
@@ -49,16 +50,19 @@ label {
   margin-bottom: 6px;
 }
 input[type="text"],
-input[type="password"] {
+input[type="password"],
+select {
   width: 100%;
   padding: 10px 12px;
   font-size: 14px;
   border: 1px solid #ddd;
   border-radius: 6px;
   transition: border-color 0.2s;
+  background: #fff;
 }
 input[type="text"]:focus,
-input[type="password"]:focus {
+input[type="password"]:focus,
+select:focus {
   outline: none;
   border-color: #007aff;
 }
@@ -184,6 +188,7 @@ button:hover {
         <input type="checkbox" name="use_rig" {{if .Config.UseRig}}checked{{end}}>
         <span>無線機（CAT / CI-V）から周波数・モードを取得</span>
       </label>
+      {{if .HasPTY}}
       <label class="checkbox-item">
         <input type="checkbox" name="use_pty" {{if .Config.UsePTY}}checked{{end}}>
         <span>PTYルーター（WSJT-X等と共有）</span>
@@ -195,25 +200,27 @@ button:hover {
         <input type="text" value="{{.PTYPath}}" readonly onclick="this.select()">
       </div>
       {{end}}
+      {{else}}
+      <div style="font-size:11px;color:#888;margin-top:4px;padding-left:28px;">※ ポート・ボーレートの変更は再起動後に反映</div>
+      {{end}}
     </div>
     <div class="form-group">
       <label>CAT / CI-V ポート</label>
-        <input
-          type="text"
-          name="rig_port"
-          value="{{.Config.RigPort}}"
-          placeholder="/dev/cu.usbmodemXXXX"
-        >
+      <select name="rig_port">
+        <option value="">-- 選択してください --</option>
+        {{range .Ports}}
+        <option value="{{.}}"{{if eq . $.Config.RigPort}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
     </div>
     <div class="form-group">
       <label>ボーレート</label>
-        <input
-          type="text"
-          name="rig_baud"
-          value="{{.Config.RigBaud}}"
-          placeholder="9600"
-        >
-      </div>
+      <select name="rig_baud">
+        {{range .Bauds}}
+        <option value="{{.}}"{{if eq . $.Config.RigBaud}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </div>
     <button type="submit">保存</button>
   </form>
   <div class="version">HAMLAB Bridge v0.1.0</div>
@@ -226,18 +233,17 @@ type PageData struct {
 	Config  Config
 	Saved   bool
 	PTYPath string
+	Ports   []string
+	Bauds   []int
+	HasPTY  bool
 }
+
+var defaultBauds = []int{4800, 9600, 19200, 38400, 57600, 115200}
 
 // startWebUI starts a web server on localhost:17801 that serves a settings page.
 // The page allows the user to set QRZ user and password, and to toggle the use of QRZ and geo lookup.
 // When the form is submitted, the settings are saved and the user is redirected back to the settings page.
 func startWebUI() {
-
-	go func() {
-		http.HandleFunc("/ws", wsHandler)
-		log.Println("WebSocket :127.0.0.1:17800/ws")
-		http.ListenAndServe("127.0.0.1:17800", nil)
-	}()
 
 	http.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
 
@@ -274,6 +280,9 @@ func startWebUI() {
 			Config:  config,
 			Saved:   r.URL.Query().Get("saved") == "1",
 			PTYPath: GetPTYPath(),
+			Ports:   listSerialPorts(),
+			Bauds:   defaultBauds,
+			HasPTY:  runtime.GOOS == "darwin" || runtime.GOOS == "linux",
 		}
 		configLock.RUnlock()
 
@@ -281,4 +290,5 @@ func startWebUI() {
 	})
 
 	http.ListenAndServe("127.0.0.1:17801", nil)
+	log.Println("Settings UI: http://127.0.0.1:17801/settings")
 }
