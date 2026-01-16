@@ -40,31 +40,43 @@ type RigState struct {
 	Mode  RigMode // USB / LSB / FM / CW / AM
 	Data  bool    // DATA ON / OFF
 	Proto RigProto
+	Index int // ポートインデックス
 }
 
 var rigState = &RigState{}
 var rigMu sync.Mutex
 
+// 複数ポート対応
+var rigStates = make(map[int]*RigState)
+var rigStatesMu sync.RWMutex
+
+// 最後にアクティブだったポートを追跡
+var lastActivePort int = -1
+var lastActivePortMu sync.Mutex
+
 var currentRigPort serial.Port
 var currentRigPortMu sync.Mutex
+
+// 複数ポート対応
+var currentRigPorts = make(map[int]serial.Port)
+var currentRigPortsMu sync.Mutex
 
 var pendingMode string
 var pendingData bool
 
 // ---- public entry ----
 
-// startRigWatcher starts the Rig watcher. It reads the Rig configuration
-// from the Config struct and starts a goroutine to read the serial port.
-// It detects the protocol of the Rig and calls the corresponding handler function.
-// If the Rig is not enabled or the port is empty, it prints a log message
-// and returns. It also sets the default baud rate to 9600 if it is not set.
-// The Rig watcher runs indefinitely until an error occurs while reading the serial port.
+// startRigWatcher starts the Rig watcher for all configured ports.
+// It reads the Rig configuration from the Config struct and starts
+// goroutines for each enabled port.
 func startRigWatcher() {
 	configLock.RLock()
 	use := config.UseRig
-	port := config.RigPort
-	baud := config.RigBaud
 	usePTY := config.UsePTY
+	rigPorts := make([]RigPortConfig, len(config.RigPorts))
+	copy(rigPorts, config.RigPorts)
+	broadcastMode := config.RigBroadcastMode
+	selectedIndex := config.SelectedRigIndex
 	configLock.RUnlock()
 
 	// PTYモードの場合は別関数へ
@@ -73,16 +85,43 @@ func startRigWatcher() {
 		return
 	}
 
-	log.Println("[RIG] use:", use, "port:", port, "baud:", baud)
-	if !use || port == "" {
+	if !use {
 		log.Println("[RIG] disabled")
 		return
 	}
+
+	// 有効なポートをカウント
+	enabledCount := 0
+	for i, rp := range rigPorts {
+		if rp.Port != "" {
+			log.Printf("[RIG] port[%d]: %s @ %d baud", i, rp.Port, rp.Baud)
+			enabledCount++
+		}
+	}
+
+	if enabledCount == 0 {
+		log.Println("[RIG] no ports configured")
+		return
+	}
+
+	log.Printf("[RIG] broadcast mode: %s, selected index: %d", broadcastMode, selectedIndex)
+
+	// 各ポートの監視を開始
+	for i, rp := range rigPorts {
+		if rp.Port == "" {
+			continue
+		}
+		go startSingleRigWatcher(i, rp.Port, rp.Baud)
+	}
+}
+
+// startSingleRigWatcher starts a Rig watcher for a single port.
+func startSingleRigWatcher(index int, port string, baud int) {
 	if baud == 0 {
 		baud = 9600
 	}
 
-	log.Println("[RIG] open:", port, baud)
+	log.Printf("[RIG-%d] open: %s @ %d baud", index, port, baud)
 
 	mode := &serial.Mode{
 		BaudRate: baud,
@@ -93,20 +132,37 @@ func startRigWatcher() {
 
 	s, err := serial.Open(port, mode)
 	if err != nil {
-		log.Println("[RIG] open error:", err)
+		log.Printf("[RIG-%d] open error: %v", index, err)
 		return
 	}
 	defer s.Close()
 
 	// グローバルに保存（設定変更時のAI1送信用）
-	currentRigPortMu.Lock()
-	currentRigPort = s
-	currentRigPortMu.Unlock()
+	currentRigPortsMu.Lock()
+	currentRigPorts[index] = s
+	currentRigPortsMu.Unlock()
 	defer func() {
-		currentRigPortMu.Lock()
-		currentRigPort = nil
-		currentRigPortMu.Unlock()
+		currentRigPortsMu.Lock()
+		delete(currentRigPorts, index)
+		currentRigPortsMu.Unlock()
 	}()
+
+	// 後方互換性: index 0 の場合は旧変数にもセット
+	if index == 0 {
+		currentRigPortMu.Lock()
+		currentRigPort = s
+		currentRigPortMu.Unlock()
+		defer func() {
+			currentRigPortMu.Lock()
+			currentRigPort = nil
+			currentRigPortMu.Unlock()
+		}()
+	}
+
+	// ポートごとの状態を初期化
+	rigStatesMu.Lock()
+	rigStates[index] = &RigState{Index: index}
+	rigStatesMu.Unlock()
 
 	buf := make([]byte, 256)
 
@@ -118,15 +174,18 @@ func startRigWatcher() {
 	// --- 初期CI-V探査 ---
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		if proto == ProtoUnknown {
-			log.Println("[RIG] initial poll: CI-V")
+		protoMu.Lock()
+		currentProto := proto
+		protoMu.Unlock()
+		if currentProto == ProtoUnknown {
+			log.Printf("[RIG-%d] initial poll: CI-V", index)
 			civInitialPoll(s)
 		}
 		time.Sleep(700 * time.Millisecond)
 		protoMu.Lock()
 		if proto == ProtoUnknown {
 			proto = ProtoCAT
-			log.Println("[RIG] fallback to CAT")
+			log.Printf("[RIG-%d] fallback to CAT", index)
 			startCATPoller(s)
 		}
 		protoMu.Unlock()
@@ -135,7 +194,7 @@ func startRigWatcher() {
 	for {
 		n, err := s.Read(buf)
 		if err != nil {
-			log.Println("[RIG] read error:", err)
+			log.Printf("[RIG-%d] read error: %v", index, err)
 			return
 		}
 		if n == 0 {
@@ -143,31 +202,29 @@ func startRigWatcher() {
 		}
 
 		data := buf[:n]
-		//log.Printf("[RIG] raw %d bytes: % X", n, data)
 
 		protoMu.Lock()
 		if proto == ProtoUnknown {
 			proto = detectProto(data)
 			if proto != ProtoUnknown {
-				log.Println("[RIG] detected protocol:", proto)
+				log.Printf("[RIG-%d] detected protocol: %s", index, proto)
 				if proto == ProtoCAT {
 					startCATPoller(s)
 				}
 			}
 		}
+		currentProto := proto
 		protoMu.Unlock()
 
-		switch proto {
+		switch currentProto {
 		case ProtoCIV:
-			handleCIV(data)
+			handleCIVForPort(index, data)
 
 		case ProtoCAT:
-			// --- CATは分割されるのでバッファ再構築 ---
 			catBuf.Write(data)
 
 			for {
 				full := catBuf.String()
-				//log.Printf("[RIG] catBuf: %q", full)
 				idx := strings.Index(full, ";")
 				if idx < 0 {
 					break
@@ -179,7 +236,7 @@ func startRigWatcher() {
 				catBuf.Reset()
 				catBuf.WriteString(rest)
 
-				handleCATCommand(strings.TrimSuffix(cmd, ";"), s)
+				handleCATCommandForPort(index, strings.TrimSuffix(cmd, ";"), s)
 			}
 		}
 	}
@@ -241,6 +298,46 @@ func handleCIV(b []byte) {
 		frame := b[start : start+end+1]
 		parseCIVFrame(frame)
 		b = b[start+end+1:]
+	}
+}
+
+// handleCIVForPort handles CI-V data for a specific port index
+func handleCIVForPort(index int, b []byte) {
+	if !shouldBroadcastFromPort(index) {
+		return
+	}
+	for {
+		start := bytes.Index(b, []byte{0xFE, 0xFE})
+		if start < 0 {
+			return
+		}
+		end := bytes.IndexByte(b[start:], 0xFD)
+		if end < 0 {
+			return
+		}
+		frame := b[start : start+end+1]
+		parseCIVFrameForPort(index, frame)
+		b = b[start+end+1:]
+	}
+}
+
+// parseCIVFrameForPort parses CI-V frame for a specific port
+func parseCIVFrameForPort(index int, f []byte) {
+	if len(f) < 7 {
+		return
+	}
+
+	cmd := f[4]
+
+	switch cmd {
+	case 0x00, 0x03:
+		if freq := parseCIVFreq(f); freq > 0 {
+			updateRigStateForPort(index, freq, "", false, ProtoCIV)
+		}
+	case 0x01, 0x04:
+		if mode, data := parseCIVMode(f); mode != "" {
+			updateRigStateForPort(index, 0, string(mode), data, ProtoCIV)
+		}
 	}
 }
 
@@ -430,29 +527,143 @@ func updateCATState(freq int64, mode string, data bool) {
 	broadcastRigState()
 }
 
+// shouldBroadcastFromPort checks if data from the given port should be broadcast
+// based on the current broadcast mode and selected port index.
+func shouldBroadcastFromPort(index int) bool {
+	configLock.RLock()
+	mode := config.RigBroadcastMode
+	selectedIndex := config.SelectedRigIndex
+	configLock.RUnlock()
+
+	//log.Printf("[RIG] shouldBroadcast: index=%d, mode=%q, selectedIndex=%d", index, mode, selectedIndex)
+
+	if mode == "single" {
+		return index == selectedIndex
+	}
+	// "all" mode: always broadcast
+	return true
+}
+
+// updateRigStateForPort updates the rig state for a specific port
+func updateRigStateForPort(index int, freq int64, mode string, data bool, proto RigProto) {
+	// Update port-specific state
+	rigStatesMu.Lock()
+	if rigStates[index] == nil {
+		rigStates[index] = &RigState{Index: index}
+	}
+	if freq > 0 {
+		rigStates[index].Freq = freq
+	}
+	if mode != "" {
+		rigStates[index].Mode = RigMode(mode)
+		rigStates[index].Data = data
+	}
+	rigStates[index].Proto = proto
+	portState := *rigStates[index]
+	rigStatesMu.Unlock()
+
+	// Check if port changed
+	lastActivePortMu.Lock()
+	portChanged := (index != lastActivePort)
+	lastActivePort = index
+	lastActivePortMu.Unlock()
+
+	// Update global state
+	rigMu.Lock()
+	if portChanged {
+		// Port changed: copy entire state from this port to avoid mixing
+		rigState.Freq = portState.Freq
+		rigState.Mode = portState.Mode
+		rigState.Data = portState.Data
+		rigState.Proto = portState.Proto
+		rigState.Index = index
+	} else {
+		// Same port: update only received fields
+		if freq > 0 {
+			rigState.Freq = portState.Freq
+		}
+		if mode != "" {
+			rigState.Mode = portState.Mode
+			rigState.Data = portState.Data
+		}
+		rigState.Proto = portState.Proto
+		rigState.Index = index
+	}
+	rigMu.Unlock()
+
+	broadcastRigState()
+}
+
+// handleCATCommandForPort handles a CAT command for a specific port
+func handleCATCommandForPort(index int, cmd string, s serial.Port) {
+	if len(cmd) < 2 {
+		return
+	}
+
+	if !shouldBroadcastFromPort(index) {
+		return
+	}
+
+	switch {
+	case strings.HasPrefix(cmd, "IF"):
+		parseIFForPort(index, cmd)
+	case strings.HasPrefix(cmd, "FA"):
+		if freq := parseCATFreq(cmd); freq > 0 {
+			updateRigStateForPort(index, freq, "", false, ProtoCAT)
+		}
+	case strings.HasPrefix(cmd, "MD"):
+		if mode, data := parseCATMode(cmd); mode != "" {
+			updateRigStateForPort(index, 0, mode, data, ProtoCAT)
+		}
+	}
+}
+
+// parseIFForPort parses IF command for a specific port
+func parseIFForPort(index int, cmd string) {
+	if len(cmd) < 30 {
+		return
+	}
+
+	// 周波数
+	freqStr := cmd[5:16] // P2
+	var hz int64
+	for _, c := range freqStr {
+		if c < '0' || c > '9' {
+			return
+		}
+		hz = hz*10 + int64(c-'0')
+	}
+
+	// モード
+	modeCode := cmd[26:27] // P6
+	mode, data := parseCATMode("MD0" + modeCode)
+
+	updateRigStateForPort(index, hz, mode, data, ProtoCAT)
+}
+
 var lastFreqPoll time.Time
 var lastMDPoll time.Time
 
-// startCATPoller starts a goroutine to send CAT poll commands to the Rig
-// at a rate of 1 per second. The goroutine will run indefinitely until an error occurs.
-// The function takes a serial.Port as a parameter and starts a goroutine to send CAT poll commands
-// to the Rig at the specified port. The function will log a message at the INFO level with
-// the string "[RIG] CAT poll" every time it sends a CAT poll command.
+// startCATPoller enables CAT Auto Information mode.
+// Note: Polling is currently disabled as AI1 (Auto Information) handles updates.
+// The polling code is kept for potential future use with older rigs that don't support AI1.
 func startCATPoller(s serial.Port) {
-	// Auto Information ON (YAESUのみ)
-	_, _ = s.Write([]byte("AI1;"))
+	// Auto Information ON (YAESU/KENWOOD)
+	_, _ = s.Write([]byte("AI1;FA;MD0;"))
 	log.Println("[RIG] CAT Auto Information enabled")
 
+	// Polling disabled - AI1 handles automatic updates
+	// Uncomment below if needed for older rigs that don't support AI1
+	/*
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			// ? を外す
 			_, _ = s.Write([]byte("FA;MD0;"))
-			//log.Println("[RIG] CAT poll")
 		}
 	}()
+	*/
 }
 
 // handleCATCommand handles a CAT command received from the serial port.
@@ -636,7 +847,7 @@ func SendAI1() {
 	defer currentRigPortMu.Unlock()
 
 	if currentRigPort != nil {
-		_, _ = currentRigPort.Write([]byte("AI1;"))
+		_, _ = currentRigPort.Write([]byte("AI1;FA;MD0;"))
 		log.Println("[RIG] AI1; sent (settings changed)")
 	}
 }

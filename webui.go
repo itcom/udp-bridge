@@ -8,7 +8,15 @@ import (
 	"strconv"
 )
 
-var tmpl = template.Must(template.New("").Parse(`<!DOCTYPE html>
+var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
+	"inc": func(i int) int { return i + 1 },
+	"safeIndex": func(slice []string, i int) string {
+		if i >= 0 && i < len(slice) {
+			return slice[i]
+		}
+		return ""
+	},
+}).Parse(`<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -25,7 +33,7 @@ body {
   padding: 20px;
 }
 .container {
-  max-width: 400px;
+  max-width: 500px;
   margin: 0 auto;
   background: #fff;
   border-radius: 12px;
@@ -153,6 +161,46 @@ button:hover {
   border-radius: 4px;
   cursor: pointer;
 }
+.port-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.port-row .port-num {
+  min-width: 20px;
+  font-size: 13px;
+  color: #666;
+}
+.port-row select {
+  flex: 2;
+}
+.port-row select.baud {
+  flex: 1;
+}
+.broadcast-mode {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f0f8ff;
+  border-radius: 6px;
+}
+.broadcast-mode label {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.broadcast-mode label:last-child {
+  margin-bottom: 0;
+}
+.broadcast-mode input[type="radio"] {
+  margin-right: 8px;
+}
+.broadcast-mode .mode-desc {
+  font-size: 11px;
+  color: #666;
+  margin-left: 24px;
+}
 </style>
 </head>
 <body>
@@ -194,32 +242,52 @@ button:hover {
         <span>PTYルーター（WSJT-X等と共有）</span>
       </label>
       <div style="font-size:11px;color:#888;margin-top:4px;padding-left:28px;">※ PTYルーター・ポート・ボーレートの変更は再起動後に反映</div>
-      {{if .PTYPath}}
-      <div class="pty-path">
-        <label>PTYパス（WSJT-X等に設定）</label>
-        <input type="text" value="{{.PTYPath}}" readonly onclick="this.select()">
-      </div>
-      {{end}}
       {{else}}
       <div style="font-size:11px;color:#888;margin-top:4px;padding-left:28px;">※ ポート・ボーレートの変更は再起動後に反映</div>
       {{end}}
     </div>
     <div class="form-group">
-      <label>CAT / CI-V ポート</label>
-      <select name="rig_port">
-        <option value="">-- 選択してください --</option>
-        {{range .Ports}}
-        <option value="{{.}}"{{if eq . $.Config.RigPort}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>ボーレート</label>
-      <select name="rig_baud">
-        {{range .Bauds}}
-        <option value="{{.}}"{{if eq . $.Config.RigBaud}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
+      <label>CAT / CI-V ポート（最大4つ）</label>
+      {{range $i, $rp := .Config.RigPorts}}
+      <div class="port-row">
+        <span class="port-num">{{inc $i}}</span>
+        <select name="rig_port_{{$i}}">
+          <option value="">-- 未使用 --</option>
+          {{range $.Ports}}
+          <option value="{{.}}"{{if eq . $rp.Port}} selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+        <select name="rig_baud_{{$i}}" class="baud">
+          {{range $.Bauds}}
+          <option value="{{.}}"{{if eq . $rp.Baud}} selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+      {{if and $.HasPTY (safeIndex $.PTYPaths $i)}}
+      <div class="pty-path" style="margin-left:28px;margin-bottom:12px;">
+        <input type="text" value="{{safeIndex $.PTYPaths $i}}" readonly onclick="this.select()" title="PTYパス (ポート{{inc $i}})">
+      </div>
+      {{end}}
+      {{end}}
+      <div class="broadcast-mode">
+        <label>
+          <input type="radio" name="broadcast_mode" value="all"{{if eq .Config.RigBroadcastMode "all"}} checked{{end}}>
+          全ポートを監視（自動選択）
+        </label>
+        <div class="mode-desc">データが来たポートを自動でbroadcast</div>
+        <label>
+          <input type="radio" name="broadcast_mode" value="single"{{if eq .Config.RigBroadcastMode "single"}} checked{{end}}>
+          選択したポートのみ
+        </label>
+        <div class="mode-desc" style="display:flex;align-items:center;gap:8px;">
+          ポート番号:
+          <select name="selected_rig_index" style="width:60px;padding:4px;">
+            {{range $i, $_ := .Config.RigPorts}}
+            <option value="{{$i}}"{{if eq $i $.Config.SelectedRigIndex}} selected{{end}}>{{inc $i}}</option>
+            {{end}}
+          </select>
+        </div>
+      </div>
     </div>
     <button type="submit">保存</button>
   </form>
@@ -230,12 +298,12 @@ button:hover {
 `))
 
 type PageData struct {
-	Config  Config
-	Saved   bool
-	PTYPath string
-	Ports   []string
-	Bauds   []int
-	HasPTY  bool
+	Config   Config
+	Saved    bool
+	PTYPaths []string
+	Ports    []string
+	Bauds    []int
+	HasPTY   bool
 }
 
 var defaultBauds = []int{4800, 9600, 19200, 38400, 57600, 115200}
@@ -259,12 +327,36 @@ func startWebUI() {
 			config.UseGeo = r.FormValue("use_geo") != ""
 			config.UseRig = r.FormValue("use_rig") != ""
 			config.UsePTY = r.FormValue("use_pty") != ""
-			config.RigPort = r.FormValue("rig_port")
-			if v := r.FormValue("rig_baud"); v != "" {
-				if baud, err := strconv.Atoi(v); err == nil {
-					config.RigBaud = baud
+
+			// 複数ポート設定の読み取り
+			for i := 0; i < 4; i++ {
+				portKey := "rig_port_" + strconv.Itoa(i)
+				baudKey := "rig_baud_" + strconv.Itoa(i)
+				config.RigPorts[i].Port = r.FormValue(portKey)
+				if v := r.FormValue(baudKey); v != "" {
+					if baud, err := strconv.Atoi(v); err == nil {
+						config.RigPorts[i].Baud = baud
+					}
 				}
 			}
+
+			// 後方互換性: RigPorts[0]をRigPort/RigBaudにも反映
+			config.RigPort = config.RigPorts[0].Port
+			config.RigBaud = config.RigPorts[0].Baud
+
+			// ブロードキャストモード
+			config.RigBroadcastMode = r.FormValue("broadcast_mode")
+			if config.RigBroadcastMode == "" {
+				config.RigBroadcastMode = "all"
+			}
+
+			// 選択ポートインデックス
+			if v := r.FormValue("selected_rig_index"); v != "" {
+				if idx, err := strconv.Atoi(v); err == nil && idx >= 0 && idx < 4 {
+					config.SelectedRigIndex = idx
+				}
+			}
+
 			saveConfig()
 			configLock.Unlock()
 
@@ -277,12 +369,12 @@ func startWebUI() {
 
 		configLock.RLock()
 		data := PageData{
-			Config:  config,
-			Saved:   r.URL.Query().Get("saved") == "1",
-			PTYPath: GetPTYPath(),
-			Ports:   listSerialPorts(),
-			Bauds:   defaultBauds,
-			HasPTY:  runtime.GOOS == "darwin" || runtime.GOOS == "linux",
+			Config:   config,
+			Saved:    r.URL.Query().Get("saved") == "1",
+			PTYPaths: GetPTYPaths(),
+			Ports:    listSerialPorts(),
+			Bauds:    defaultBauds,
+			HasPTY:   runtime.GOOS == "darwin" || runtime.GOOS == "linux",
 		}
 		configLock.RUnlock()
 
