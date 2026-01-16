@@ -42,6 +42,7 @@ func startBridge() {
 
 		configLock.RLock()
 		useQRZ := config.UseQRZ
+		useGeo := config.UseGeo
 		configLock.RUnlock()
 
 		qrzOperator := ""
@@ -93,7 +94,7 @@ func startBridge() {
 		finalGrid := betterGrid(grid, qrzGrid)
 
 		jcc := ""
-		if len(finalGrid) >= 6 {
+		if useGeo && len(finalGrid) >= 6 {
 			jcc, _ = geoLookup(finalGrid)
 		}
 
