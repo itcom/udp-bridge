@@ -190,7 +190,7 @@ func startSingleRigWatcher(index int, port string, baud int) {
 		if proto == ProtoUnknown {
 			proto = ProtoCAT
 			log.Printf("[RIG-%d] fallback to CAT", index)
-			startCATPoller(s)
+			startCATPoller(index, s)
 		}
 		protoMu.Unlock()
 	}()
@@ -215,7 +215,7 @@ func startSingleRigWatcher(index int, port string, baud int) {
 			if proto != ProtoUnknown {
 				log.Printf("[RIG-%d] detected protocol: %s", index, proto)
 				if proto == ProtoCAT {
-					startCATPoller(s)
+					startCATPoller(index, s)
 				}
 				// 検出成功後、蓄積データを処理対象にする
 				data = detectBuf
@@ -725,25 +725,49 @@ var lastFreqPoll time.Time
 var lastMDPoll time.Time
 
 // startCATPoller enables CAT Auto Information mode.
-// Note: Polling is currently disabled as AI1 (Auto Information) handles updates.
-// The polling code is kept for potential future use with older rigs that don't support AI1.
-func startCATPoller(s serial.Port) {
+// If the rig doesn't respond within timeout, it falls back to polling mode
+// for older rigs that don't support AI1 (e.g., FT-817, FT-857, TS-2000).
+func startCATPoller(index int, s serial.Port) {
 	// Auto Information ON (YAESU/KENWOOD)
 	_, _ = s.Write([]byte("AI1;FA;MD0;"))
-	log.Println("[RIG] CAT Auto Information enabled")
+	log.Printf("[RIG-%d] CAT Auto Information enabled", index)
 
-	// Polling disabled - AI1 handles automatic updates
-	// Uncomment below if needed for older rigs that don't support AI1
-	/*
-		go func() {
-			ticker := time.NewTicker(3 * time.Second)
-			defer ticker.Stop()
+	// Wait and check if AI1 is working
+	go func() {
+		time.Sleep(2 * time.Second)
 
-			for range ticker.C {
-				_, _ = s.Write([]byte("FA;MD0;"))
-			}
-		}()
-	*/
+		// Check if we received any data
+		rigStatesMu.RLock()
+		state := rigStates[index]
+		hasData := state != nil && state.Freq > 0
+		rigStatesMu.RUnlock()
+
+		if !hasData {
+			// AI1 not working, start polling mode
+			log.Printf("[RIG-%d] AI1 not responding, starting polling mode (legacy rig support)", index)
+			startCATPollingLoop(index, s)
+		}
+	}()
+}
+
+// startCATPollingLoop starts a polling loop for older rigs that don't support AI1.
+// This enables support for legacy rigs like FT-817, FT-857, FT-897, TS-2000, etc.
+func startCATPollingLoop(index int, s serial.Port) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Check if port is still valid
+		currentRigPortsMu.Lock()
+		_, exists := currentRigPorts[index]
+		currentRigPortsMu.Unlock()
+		if !exists {
+			log.Printf("[RIG-%d] polling stopped (port closed)", index)
+			return
+		}
+
+		_, _ = s.Write([]byte("FA;MD0;"))
+	}
 }
 
 // handleCATCommand handles a CAT command received from the serial port.

@@ -287,26 +287,49 @@ func runSinglePortPTYIndependent(index int, port string, com serial.Port, ptmx *
 	}
 }
 
-// startCATPollerPTYForPort starts CAT polling in PTY mode for a specific port
-// Note: Polling is currently disabled as AI1 (Auto Information) handles updates.
-// The polling code is kept for potential future use with older rigs that don't support AI1.
+// startCATPollerPTYForPort starts CAT polling in PTY mode for a specific port.
+// If the rig doesn't respond within timeout, it falls back to polling mode
+// for older rigs that don't support AI1 (e.g., FT-817, FT-857, TS-2000).
 func startCATPollerPTYForPort(index int, s serial.Port) {
 	// CATプロトコル=YAESU/KENWOODなのでAI1を送信
 	_, _ = s.Write([]byte("AI1;FA;MD0;"))
 	log.Printf("[RIG-PTY-%d] CAT Auto Information enabled", index)
 
-	// Polling disabled - AI1 handles automatic updates
-	// Uncomment below if needed for older rigs that don't support AI1
-	/*
+	// Wait and check if AI1 is working
 	go func() {
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
+		time.Sleep(2 * time.Second)
 
-		for range ticker.C {
-			_, _ = s.Write([]byte("FA;MD0;"))
+		// Check if we received any data
+		rigStatesMu.RLock()
+		state := rigStates[index]
+		hasData := state != nil && state.Freq > 0
+		rigStatesMu.RUnlock()
+
+		if !hasData {
+			// AI1 not working, start polling mode
+			log.Printf("[RIG-PTY-%d] AI1 not responding, starting polling mode (legacy rig support)", index)
+			startCATPollingLoopPTY(index, s)
 		}
 	}()
-	*/
+}
+
+// startCATPollingLoopPTY starts a polling loop for older rigs in PTY mode.
+func startCATPollingLoopPTY(index int, s serial.Port) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Check if port is still valid
+		currentRigPortsMu.Lock()
+		_, exists := currentRigPorts[index]
+		currentRigPortsMu.Unlock()
+		if !exists {
+			log.Printf("[RIG-PTY-%d] polling stopped (port closed)", index)
+			return
+		}
+
+		_, _ = s.Write([]byte("FA;MD0;"))
+	}
 }
 
 // handleCATCommandPTY handles CAT commands for PTY mode
