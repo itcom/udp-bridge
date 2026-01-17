@@ -54,6 +54,7 @@ var rigStatesMu sync.RWMutex
 // 最後にアクティブだったポートを追跡
 var lastActivePort int = -1
 var lastActivePortMu sync.Mutex
+var lastActiveTime time.Time // 最後にアクティブになった時刻
 
 var currentRigPort serial.Port
 var currentRigPortMu sync.Mutex
@@ -603,36 +604,70 @@ func updateRigStateForPort(index int, freq int64, mode string, data bool, proto 
 	}
 
 	// 変化があるかチェック
-	changed := false
-	if freq > 0 && rigStates[index].Freq != freq {
-		rigStates[index].Freq = freq
-		changed = true
+	freqChanged := false
+	modeChanged := false
+
+	// 周波数の変化検出（100Hz以上の変化のみ）
+	if freq > 0 {
+		diff := freq - rigStates[index].Freq
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff >= 100 {
+			rigStates[index].Freq = freq
+			freqChanged = true
+		}
 	}
+
+	// モードの変化検出
 	if mode != "" && (rigStates[index].Mode != RigMode(mode) || rigStates[index].Data != data) {
 		rigStates[index].Mode = RigMode(mode)
 		rigStates[index].Data = data
-		changed = true
+		modeChanged = true
 	}
 	rigStates[index].Proto = proto
 	portState := *rigStates[index]
 	rigStatesMu.Unlock()
 
 	// 変化がなければブロードキャストしない
-	if !changed {
+	if !freqChanged && !modeChanged {
 		return
 	}
 
-	// アクティブポートを更新
+	// アクティブポートのチェック
+	// 別のポートが最近500ms以内にアクティブだった場合、周波数のみの変化は無視
 	lastActivePortMu.Lock()
+	now := time.Now()
+	if lastActivePort != -1 && lastActivePort != index {
+		if now.Sub(lastActiveTime) < 500*time.Millisecond {
+			// 別のポートがアクティブで、500ms以内
+			if !modeChanged {
+				// モード変更がない場合は無視（CI-Vトランシーブのノイズ）
+				lastActivePortMu.Unlock()
+				return
+			}
+		}
+	}
+	// アクティブポートを更新
 	lastActivePort = index
+	lastActiveTime = now
 	lastActivePortMu.Unlock()
 
 	// Update global state
 	rigMu.Lock()
-	rigState.Freq = portState.Freq
-	rigState.Mode = portState.Mode
-	rigState.Data = portState.Data
-	rigState.Proto = portState.Proto
+	if freqChanged {
+		rigState.Freq = portState.Freq
+	}
+	if modeChanged {
+		rigState.Mode = portState.Mode
+		rigState.Data = portState.Data
+	} else if freqChanged && portState.Mode != "" {
+		// 周波数のみ変化でポートのモードが設定済みの場合
+		rigState.Mode = portState.Mode
+		rigState.Data = portState.Data
+	}
+	// モードが未設定の場合はグローバルのモードを維持
+	rigState.Proto = proto
 	rigState.Index = index
 	rigMu.Unlock()
 
