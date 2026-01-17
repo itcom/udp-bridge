@@ -171,6 +171,8 @@ func startSingleRigWatcher(index int, port string, baud int) {
 	var proto RigProto
 
 	var catBuf strings.Builder
+	var civBuf []byte    // CI-V用バッファ（分割受信対策）
+	var detectBuf []byte // プロトコル検出用バッファ（CI-V分割受信対策）
 
 	// --- 初期CI-V探査 ---
 	go func() {
@@ -206,12 +208,24 @@ func startSingleRigWatcher(index int, port string, baud int) {
 
 		protoMu.Lock()
 		if proto == ProtoUnknown {
-			proto = detectProto(data)
+			// プロトコル未確定時はバッファに蓄積して判定
+			detectBuf = append(detectBuf, data...)
+			proto = detectProto(detectBuf)
 			if proto != ProtoUnknown {
 				log.Printf("[RIG-%d] detected protocol: %s", index, proto)
 				if proto == ProtoCAT {
 					startCATPoller(s)
 				}
+				// 検出成功後、蓄積データを処理対象にする
+				data = detectBuf
+				detectBuf = nil
+			} else {
+				// まだ検出できない場合、バッファが大きくなりすぎないよう制限
+				if len(detectBuf) > 64 {
+					detectBuf = detectBuf[len(detectBuf)-32:]
+				}
+				protoMu.Unlock()
+				continue // 次の読み取りを待つ
 			}
 		}
 		currentProto := proto
@@ -219,7 +233,35 @@ func startSingleRigWatcher(index int, port string, baud int) {
 
 		switch currentProto {
 		case ProtoCIV:
-			handleCIVForPort(index, data)
+			if !shouldBroadcastFromPort(index) {
+				break
+			}
+			// CI-Vバッファに追加
+			civBuf = append(civBuf, data...)
+			// 完全なフレームを処理
+			for {
+				start := bytes.Index(civBuf, []byte{0xFE, 0xFE})
+				if start < 0 {
+					// FE FE がない場合、単独FEがあれば残す
+					lastFE := bytes.LastIndexByte(civBuf, 0xFE)
+					if lastFE >= 0 {
+						civBuf = civBuf[lastFE:] // 最後のFE以降を残す
+					} else {
+						civBuf = nil
+					}
+					break
+				}
+				if start > 0 {
+					civBuf = civBuf[start:] // FE FE の前のゴミを除去
+				}
+				end := bytes.IndexByte(civBuf[2:], 0xFD) // FE FE の後から FD を探す
+				if end < 0 {
+					break // FD がまだ来ていない
+				}
+				frame := civBuf[:2+end+1]
+				parseCIVFrameForPort(index, frame)
+				civBuf = civBuf[2+end+1:]
+			}
 
 		case ProtoCAT:
 			catBuf.Write(data)
@@ -248,9 +290,16 @@ func startSingleRigWatcher(index int, port string, baud int) {
 // Currently, it supports CI-V and CAT protocols.
 // CI-V protocol is detected by the presence of 0xFE 0xFE at the start of the frame.
 // CAT protocol is detected by the presence of a semicolon (:) in the frame.
+// detectProto determines the protocol of the given byte slice.
 func detectProto(b []byte) RigProto {
+	// CI-V: FE FE パターンを検索（連続していなくても最初のFEがあればCI-Vの可能性）
 	if bytes.Contains(b, []byte{0xFE, 0xFE}) {
 		return ProtoCIV
+	}
+
+	// 単独の FE が含まれている場合はまだ判定しない（次のデータを待つ）
+	if bytes.Contains(b, []byte{0xFE}) {
+		return ProtoUnknown // まだ判定しない
 	}
 
 	s := string(b)
@@ -552,44 +601,39 @@ func updateRigStateForPort(index int, freq int64, mode string, data bool, proto 
 	if rigStates[index] == nil {
 		rigStates[index] = &RigState{Index: index}
 	}
-	if freq > 0 {
+
+	// 変化があるかチェック
+	changed := false
+	if freq > 0 && rigStates[index].Freq != freq {
 		rigStates[index].Freq = freq
+		changed = true
 	}
-	if mode != "" {
+	if mode != "" && (rigStates[index].Mode != RigMode(mode) || rigStates[index].Data != data) {
 		rigStates[index].Mode = RigMode(mode)
 		rigStates[index].Data = data
+		changed = true
 	}
 	rigStates[index].Proto = proto
 	portState := *rigStates[index]
 	rigStatesMu.Unlock()
 
-	// Check if port changed
+	// 変化がなければブロードキャストしない
+	if !changed {
+		return
+	}
+
+	// アクティブポートを更新
 	lastActivePortMu.Lock()
-	portChanged := (index != lastActivePort)
 	lastActivePort = index
 	lastActivePortMu.Unlock()
 
 	// Update global state
 	rigMu.Lock()
-	if portChanged {
-		// Port changed: copy entire state from this port to avoid mixing
-		rigState.Freq = portState.Freq
-		rigState.Mode = portState.Mode
-		rigState.Data = portState.Data
-		rigState.Proto = portState.Proto
-		rigState.Index = index
-	} else {
-		// Same port: update only received fields
-		if freq > 0 {
-			rigState.Freq = portState.Freq
-		}
-		if mode != "" {
-			rigState.Mode = portState.Mode
-			rigState.Data = portState.Data
-		}
-		rigState.Proto = portState.Proto
-		rigState.Index = index
-	}
+	rigState.Freq = portState.Freq
+	rigState.Mode = portState.Mode
+	rigState.Data = portState.Data
+	rigState.Proto = portState.Proto
+	rigState.Index = index
 	rigMu.Unlock()
 
 	broadcastRigState()
@@ -656,14 +700,14 @@ func startCATPoller(s serial.Port) {
 	// Polling disabled - AI1 handles automatic updates
 	// Uncomment below if needed for older rigs that don't support AI1
 	/*
-	go func() {
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
 
-		for range ticker.C {
-			_, _ = s.Write([]byte("FA;MD0;"))
-		}
-	}()
+			for range ticker.C {
+				_, _ = s.Write([]byte("FA;MD0;"))
+			}
+		}()
 	*/
 }
 
