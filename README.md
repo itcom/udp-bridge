@@ -54,6 +54,60 @@ HAMLAB Bridge（ローカル常駐）← 無線機（CAT / CI-V）× 複数台�
 1. [Releases](https://github.com/itcom/udp-bridge/releases) から `hamlab-bridge-Setup-x64.exe` をダウンロード
 2. インストーラを実行
 
+### Linux
+
+#### Ubuntu / Debian 系
+
+1. [Releases](https://github.com/itcom/udp-bridge/releases) から `hamlab-bridge-linux-amd64` または `hamlab-bridge-linux-arm64` をダウンロード
+2. 実行権限を付与して起動
+   ```bash
+   chmod +x hamlab-bridge-linux-amd64
+   ./hamlab-bridge-linux-amd64
+   ```
+
+#### RHEL / Fedora / CentOS 系
+
+1. [Releases](https://github.com/itcom/udp-bridge/releases) から `hamlab-bridge-linux-amd64` または `hamlab-bridge-linux-arm64` をダウンロード
+2. 実行権限を付与して起動
+   ```bash
+   chmod +x hamlab-bridge-linux-amd64
+   ./hamlab-bridge-linux-amd64
+   ```
+
+#### systemd でバックグラウンド実行
+
+バックグラウンドで常駐させる場合は systemd を利用できます。
+
+1. `/etc/systemd/system/hamlab-bridge.service` を作成：
+   ```ini
+   [Unit]
+   Description=HAMLAB Bridge
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=YOUR_USERNAME
+   WorkingDirectory=/home/YOUR_USERNAME
+   ExecStart=/path/to/hamlab-bridge-linux-amd64
+   Restart=always
+   RestartSec=10
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+2. サービスを有効化して起動：
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable hamlab-bridge
+   sudo systemctl start hamlab-bridge
+   ```
+
+3. 状態確認：
+   ```bash
+   sudo systemctl status hamlab-bridge
+   ```
+
 ### ソースからビルド
 
 ```bash
@@ -255,7 +309,7 @@ xattr -cr /Applications/HAMLAB\ Bridge.app
 
 - macOS 12 以降（Intel / Apple Silicon 両対応）
 - Windows 10 / 11
-- Linux（GTK3 対応環境）
+- Linux（Ubuntu 20.04+, Debian 11+, RHEL 8+, Fedora 35+ など）
 - WSJT-X または JTDX
 
 ## ライセンス
