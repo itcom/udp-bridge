@@ -1,0 +1,41 @@
+name: Release Linux binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Go binaries
+        run: |
+          mkdir -p build
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o build/hamlab-bridge-linux-amd64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o build/hamlab-bridge-linux-arm64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamlab-bridge-linux
+          path: build/hamlab-bridge-linux-*
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/hamlab-bridge-linux-amd64
+            build/hamlab-bridge-linux-arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

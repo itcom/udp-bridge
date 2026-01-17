@@ -291,7 +291,7 @@ button:hover {
     </div>
     <button type="submit">保存</button>
   </form>
-  <div class="version">HAMLAB Bridge v0.3.3</div>
+  <div class="version">HAMLAB Bridge v0.3.4</div>
 </div>
 </body>
 </html>
