@@ -291,7 +291,7 @@ button:hover {
     </div>
     <button type="submit">保存</button>
   </form>
-  <div class="version">HAMLAB Bridge v0.3.6</div>
+  <div class="version">HAMLAB Bridge v0.4.0</div>
 </div>
 </body>
 </html>
@@ -321,6 +321,14 @@ func startWebUI() {
 			_ = r.ParseForm()
 
 			configLock.Lock()
+			// 変更検知のため古い設定を保存
+			oldUseRig := config.UseRig
+			oldUsePTY := config.UsePTY
+			oldPorts := make([]RigPortConfig, len(config.RigPorts))
+			copy(oldPorts, config.RigPorts)
+			oldBroadcastMode := config.RigBroadcastMode
+			oldSelectedIndex := config.SelectedRigIndex
+
 			config.QRZUser = r.FormValue("user")
 			config.QRZPass = r.FormValue("pass")
 			config.UseQRZ = r.FormValue("use_qrz") != ""
@@ -357,11 +365,37 @@ func startWebUI() {
 				}
 			}
 
+			// リグ設定の変更をチェック
+			rigSettingsChanged := false
+			if oldUseRig != config.UseRig || oldUsePTY != config.UsePTY {
+				rigSettingsChanged = true
+			}
+			if oldBroadcastMode != config.RigBroadcastMode || oldSelectedIndex != config.SelectedRigIndex {
+				rigSettingsChanged = true
+			}
+			for i := range config.RigPorts {
+				if oldPorts[i].Port != config.RigPorts[i].Port || oldPorts[i].Baud != config.RigPorts[i].Baud {
+					rigSettingsChanged = true
+					break
+				}
+			}
+
 			saveConfig()
 			configLock.Unlock()
 
-			// Auto Information を再有効化（WSJT-X等がAI0;を送るため）
-			SendAI1()
+			// リグ設定が変更された場合は再起動（非同期）
+			if rigSettingsChanged && config.UseRig {
+				log.Println("[CONFIG] rig settings changed, restarting rig watcher...")
+				go func() {
+					if config.UsePTY && (runtime.GOOS == "darwin" || runtime.GOOS == "linux") {
+						restartRigWatcherWithPTY()
+					} else {
+						restartRigWatcher()
+					}
+					// Auto Information を再有効化（WSJT-X等がAI0;を送るため）
+					SendAI1()
+				}()
+			}
 
 			http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 			return

@@ -31,3 +31,10 @@ func startRigWatcherWithPTY() {
 func broadcastPTYPaths() {
 	// PTY not supported on Windows
 }
+
+// restartRigWatcherWithPTY is not supported on Windows.
+// Falls back to normal rig watcher restart.
+func restartRigWatcherWithPTY() {
+	log.Println("[RIG-PTY] PTY mode is not supported on Windows, using normal restart")
+	restartRigWatcher()
+}

@@ -19,6 +19,10 @@ import (
 var ptyPaths []string
 var ptyPathsMu sync.RWMutex
 
+// PTY再起動制御
+var ptyStopFlag bool
+var ptyStopMu sync.Mutex
+
 // GetPTYPaths returns the current PTY slave paths for external applications
 func GetPTYPaths() []string {
 	ptyPathsMu.RLock()
@@ -36,6 +40,38 @@ func GetPTYPath() string {
 		return ptyPaths[0]
 	}
 	return ""
+}
+
+// stopRigWatcherWithPTY stops all running PTY watchers
+func stopRigWatcherWithPTY() {
+	ptyStopMu.Lock()
+	ptyStopFlag = true
+	ptyStopMu.Unlock()
+
+	// 既存の接続を全てクローズ
+	currentRigPortsMu.Lock()
+	for _, port := range currentRigPorts {
+		if port != nil {
+			port.Close()
+		}
+	}
+	currentRigPortsMu.Unlock()
+
+	// 少し待機してgoroutineが終了するのを待つ
+	time.Sleep(500 * time.Millisecond)
+
+	ptyStopMu.Lock()
+	ptyStopFlag = false
+	ptyStopMu.Unlock()
+
+	log.Println("[RIG-PTY] stopped")
+}
+
+// restartRigWatcherWithPTY restarts all PTY watchers with new configuration
+func restartRigWatcherWithPTY() {
+	log.Println("[RIG-PTY] restarting with new configuration...")
+	stopRigWatcherWithPTY()
+	startRigWatcherWithPTY()
 }
 
 // startRigWatcherWithPTY starts the Rig watcher with PTY routing.
@@ -231,6 +267,15 @@ func runSinglePortPTYIndependent(index int, port string, com serial.Port, ptmx *
 	// Main loop: COM → PTY (responses from rig to external app)
 	buf := make([]byte, 256)
 	for {
+		// 停止フラグチェック
+		ptyStopMu.Lock()
+		if ptyStopFlag {
+			ptyStopMu.Unlock()
+			log.Printf("[RIG-PTY-%d] stopping (restart requested)", index)
+			return
+		}
+		ptyStopMu.Unlock()
+
 		n, err := com.Read(buf)
 		if err != nil {
 			log.Printf("[RIG-PTY-%d] COM read error: %v", index, err)

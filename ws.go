@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"sync"
 
@@ -26,6 +27,9 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	clientsMu.Lock()
 	clients[c] = true
 	clientsMu.Unlock()
+
+	// Start goroutine to handle incoming messages from this client
+	go handleClientMessages(c)
 }
 
 // Broadcast sends a message to all connected WebSocket clients.
@@ -50,6 +54,88 @@ func broadcastWorker() {
 			}
 		}
 		clientsMu.Unlock()
+	}
+}
+
+// handleClientMessages handles incoming messages from a WebSocket client
+func handleClientMessages(c *websocket.Conn) {
+	defer func() {
+		clientsMu.Lock()
+		delete(clients, c)
+		c.Close()
+		clientsMu.Unlock()
+	}()
+
+	for {
+		_, msg, err := c.ReadMessage()
+		if err != nil {
+			return
+		}
+
+		// Parse incoming message as JSON
+		var req map[string]interface{}
+		if err := json.Unmarshal(msg, &req); err != nil {
+			continue
+		}
+
+		// Handle different message types
+		if msgType, ok := req["type"].(string); ok {
+			switch msgType {
+			case "getRigState":
+				// Get RigState for a specific port
+				portIndex := -1
+				if idx, ok := req["port"].(float64); ok {
+					portIndex = int(idx)
+				}
+
+				var response map[string]interface{}
+				if portIndex >= 0 {
+					// Get specific port state
+					rigStatesMu.RLock()
+					if state, exists := rigStates[portIndex]; exists && state != nil {
+						response = map[string]interface{}{
+							"type":  "rigState",
+							"port":  portIndex,
+							"freq":  state.Freq,
+							"mode":  state.Mode,
+							"data":  state.Data,
+							"proto": state.Proto,
+						}
+					} else {
+						response = map[string]interface{}{
+							"type":  "error",
+							"error": "Port not found or not initialized",
+						}
+					}
+					rigStatesMu.RUnlock()
+				} else {
+					// Get all port states
+					rigStatesMu.RLock()
+					states := make(map[string]interface{})
+					for idx, state := range rigStates {
+						if state != nil {
+							states[string(rune(idx+'0'))] = map[string]interface{}{
+								"freq":  state.Freq,
+								"mode":  state.Mode,
+								"data":  state.Data,
+								"proto": state.Proto,
+								"port":  state.Index,
+							}
+						}
+					}
+					response = map[string]interface{}{
+						"type":   "rigStates",
+						"states": states,
+					}
+					rigStatesMu.RUnlock()
+				}
+
+				// Send response
+				if responseBytes, err := json.Marshal(response); err == nil {
+					c.WriteMessage(websocket.TextMessage, responseBytes)
+				}
+			}
+		}
 	}
 }
 

@@ -107,10 +107,46 @@ var currentRigPortMu sync.Mutex
 var currentRigPorts = make(map[int]serial.Port)
 var currentRigPortsMu sync.Mutex
 
+// 再起動制御
+var rigStopFlag bool
+var rigStopMu sync.Mutex
+
 var pendingMode string
 var pendingData bool
 
 // ---- public entry ----
+
+// stopRigWatcher stops all running rig watchers
+func stopRigWatcher() {
+	rigStopMu.Lock()
+	rigStopFlag = true
+	rigStopMu.Unlock()
+
+	// 既存の接続を全てクローズ
+	currentRigPortsMu.Lock()
+	for _, port := range currentRigPorts {
+		if port != nil {
+			port.Close()
+		}
+	}
+	currentRigPortsMu.Unlock()
+
+	// 少し待機してgoroutineが終了するのを待つ
+	time.Sleep(500 * time.Millisecond)
+
+	rigStopMu.Lock()
+	rigStopFlag = false
+	rigStopMu.Unlock()
+
+	log.Println("[RIG] stopped")
+}
+
+// restartRigWatcher restarts all rig watchers with new configuration
+func restartRigWatcher() {
+	log.Println("[RIG] restarting with new configuration...")
+	stopRigWatcher()
+	startRigWatcher()
+}
 
 // startRigWatcher starts the Rig watcher for all configured ports.
 // It reads the Rig configuration from the Config struct and starts
@@ -240,6 +276,15 @@ func startSingleRigWatcher(index int, port string, baud int) {
 	}()
 
 	for {
+		// 停止フラグチェック
+		rigStopMu.Lock()
+		if rigStopFlag {
+			rigStopMu.Unlock()
+			log.Printf("[RIG-%d] stopping (restart requested)", index)
+			return
+		}
+		rigStopMu.Unlock()
+
 		n, err := s.Read(buf)
 		if err != nil {
 			log.Printf("[RIG-%d] read error: %v", index, err)
@@ -1066,8 +1111,9 @@ func broadcastRigState() {
 	lastBroadcast.Proto = rigState.Proto
 
 	ev := map[string]interface{}{
-		"type": "rig",
-		"rig":  rigState.Proto,
+		"type":  "rig",
+		"rig":   rigState.Proto,
+		"port":  rigState.Index,
 	}
 
 	if rigState.Freq > 0 {
