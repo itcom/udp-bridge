@@ -311,19 +311,22 @@ func detectProto(b []byte) RigProto {
 	return ProtoUnknown
 }
 
-// civInitialPoll sends an initial poll command to the CI-V device.
-// It sends two commands: one to get the current frequency and one to get the current mode.
-// The commands are sent in the format of FE FE [to] [from] CMD FD, where to/from is 0x00 (broadcast).
-// If the current frequency or mode is not known, the corresponding command is sent.
+// civInitialPoll sends initial poll commands to the given serial port.
+// The commands are 'FE FE [to] [from] CMD FD', where 'to' and 'from' are
+// the broadcast address (0x00), CMD is the command (0x03 for freq,
+// 0x04 for mode), and FD is the frame delimiter (0xFD).
+// The function sends the commands with a 50ms delay in between.
+// This is to ensure that the commands are sent in sequence and
+// the rig has enough time to process them.
 func civInitialPoll(s serial.Port) {
 	// FE FE [to] [from] CMD FD
 	// to/from は 0x00（ブロードキャスト）でOK
-	if rigState.Freq == 0 {
-		s.Write([]byte{0xFE, 0xFE, 0x00, 0x00, 0x03, 0xFD}) // freq
-	}
-	if rigState.Mode == "" {
-		s.Write([]byte{0xFE, 0xFE, 0x00, 0x00, 0x04, 0xFD}) // mode
-	}
+	// 一部のリグ（IC-7300/IC-9700で確認）は複数のコマンドを投げても最後のコマンドにしか応答しないため、
+	// 短い間隔をあけて順番に投げる
+	s.Write([]byte{0xFE, 0xFE, 0x00, 0x00, 0x03, 0xFD}) // freq
+	time.Sleep(50 * time.Millisecond)
+	s.Write([]byte{0xFE, 0xFE, 0x00, 0x00, 0x04, 0xFD}) // mode
+	time.Sleep(50 * time.Millisecond)
 }
 
 // handleCIV parses the given byte slice as a CI-V frame.
@@ -374,6 +377,7 @@ func handleCIVForPort(index int, b []byte) {
 
 // parseCIVFrameForPort parses CI-V frame for a specific port
 func parseCIVFrameForPort(index int, f []byte) {
+	//log.Printf("CI-V PORT %d RAW: % X (len=%d)", index, f, len(f))
 	if len(f) < 7 {
 		return
 	}
@@ -653,22 +657,21 @@ func updateRigStateForPort(index int, freq int64, mode string, data bool, proto 
 	lastActiveTime = now
 	lastActivePortMu.Unlock()
 
-	// Update global state
+	// Update global state with complete port state
 	rigMu.Lock()
-	if freqChanged {
-		rigState.Freq = portState.Freq
+	if freqChanged || modeChanged {
+		// 周波数が有効な場合のみ更新（未設定時はグローバル保持）
+		if portState.Freq > 0 {
+			rigState.Freq = portState.Freq
+		}
+		// モードが設定済みの場合のみ更新（未設定時はグローバル保持）
+		if portState.Mode != "" {
+			rigState.Mode = portState.Mode
+			rigState.Data = portState.Data
+		}
+		rigState.Proto = proto
+		rigState.Index = index
 	}
-	if modeChanged {
-		rigState.Mode = portState.Mode
-		rigState.Data = portState.Data
-	} else if freqChanged && portState.Mode != "" {
-		// 周波数のみ変化でポートのモードが設定済みの場合
-		rigState.Mode = portState.Mode
-		rigState.Data = portState.Data
-	}
-	// モードが未設定の場合はグローバルのモードを維持
-	rigState.Proto = proto
-	rigState.Index = index
 	rigMu.Unlock()
 
 	broadcastRigState()
