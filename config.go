@@ -58,14 +58,14 @@ func loadConfig() {
 
 	// RigPortsが空の場合は4つの空エントリで初期化
 	if len(config.RigPorts) == 0 {
-		config.RigPorts = make([]RigPortConfig, 4)
+		config.RigPorts = make([]RigPortConfig, 5)
 		for i := range config.RigPorts {
 			config.RigPorts[i].Baud = 9600
 		}
 	}
 
 	// 4つに満たない場合は拡張
-	for len(config.RigPorts) < 4 {
+	for len(config.RigPorts) < 5 {
 		config.RigPorts = append(config.RigPorts, RigPortConfig{Baud: 9600})
 	}
 

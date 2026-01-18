@@ -247,7 +247,7 @@ button:hover {
       {{end}}
     </div>
     <div class="form-group">
-      <label>CAT / CI-V ポート（最大4つ）</label>
+      <label>CAT / CI-V ポート（最大5つ）</label>
       {{range $i, $rp := .Config.RigPorts}}
       <div class="port-row">
         <span class="port-num">{{inc $i}}</span>
@@ -291,7 +291,7 @@ button:hover {
     </div>
     <button type="submit">保存</button>
   </form>
-  <div class="version">HAMLAB Bridge v0.3.5</div>
+  <div class="version">HAMLAB Bridge v0.3.6</div>
 </div>
 </body>
 </html>
@@ -329,7 +329,7 @@ func startWebUI() {
 			config.UsePTY = r.FormValue("use_pty") != ""
 
 			// 複数ポート設定の読み取り
-			for i := 0; i < 4; i++ {
+			for i := 0; i < 5; i++ {
 				portKey := "rig_port_" + strconv.Itoa(i)
 				baudKey := "rig_baud_" + strconv.Itoa(i)
 				config.RigPorts[i].Port = r.FormValue(portKey)
@@ -352,7 +352,7 @@ func startWebUI() {
 
 			// 選択ポートインデックス
 			if v := r.FormValue("selected_rig_index"); v != "" {
-				if idx, err := strconv.Atoi(v); err == nil && idx >= 0 && idx < 4 {
+				if idx, err := strconv.Atoi(v); err == nil && idx >= 0 && idx < 5 {
 					config.SelectedRigIndex = idx
 				}
 			}

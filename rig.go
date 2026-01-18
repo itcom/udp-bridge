@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"log"
 	"runtime"
@@ -42,6 +41,51 @@ type RigState struct {
 	Data  bool    // DATA ON / OFF
 	Proto RigProto
 	Index int // ポートインデックス
+}
+
+// CIVRigInfo holds CI-V rig specific parsing information
+type CIVRigInfo struct {
+	Name       string
+	FreqOffset int // Offset from FE FE to from cmd to frequency data start
+	FreqBytes  int // Number of BCD bytes for frequency
+}
+
+// civRigDatabase maps CI-V addresses to rig-specific parsing info
+// Based on flrig source code analysis
+var civRigDatabase = map[byte]CIVRigInfo{
+	// Pattern 1: p+5, 4 bytes (8 digits) - Legacy rigs
+	0x04: {Name: "IC-735", FreqOffset: 5, FreqBytes: 4},
+
+	// Pattern 3: p+5, 5 bytes (10 digits) - Standard modern rigs (most common)
+	0x1C: {Name: "IC-751", FreqOffset: 5, FreqBytes: 5},
+	0x38: {Name: "IC-728", FreqOffset: 5, FreqBytes: 5},
+	0x1A: {Name: "IC-R71", FreqOffset: 5, FreqBytes: 5},
+	0x5E: {Name: "IC-718", FreqOffset: 5, FreqBytes: 5},
+	0x58: {Name: "IC-706MKIIG", FreqOffset: 5, FreqBytes: 5},
+	0x56: {Name: "IC-746", FreqOffset: 5, FreqBytes: 5},
+	0x66: {Name: "IC-746", FreqOffset: 5, FreqBytes: 5},
+	0x50: {Name: "IC-756", FreqOffset: 5, FreqBytes: 5},
+	0x5C: {Name: "IC-756", FreqOffset: 5, FreqBytes: 5},
+	0x64: {Name: "IC-756PRO2", FreqOffset: 5, FreqBytes: 5},
+	0x6E: {Name: "IC-756PRO3", FreqOffset: 5, FreqBytes: 5},
+	0x70: {Name: "IC-7000", FreqOffset: 5, FreqBytes: 5},
+	0x88: {Name: "IC-7100", FreqOffset: 5, FreqBytes: 5},
+	0x76: {Name: "IC-7200", FreqOffset: 5, FreqBytes: 5},
+	0x7A: {Name: "IC-7600", FreqOffset: 5, FreqBytes: 5},
+	0x68: {Name: "IC-703", FreqOffset: 5, FreqBytes: 5},
+	0x8A: {Name: "ICF8101", FreqOffset: 5, FreqBytes: 5},
+	0x7C: {Name: "IC-9100", FreqOffset: 5, FreqBytes: 5},
+	0xA2: {Name: "IC-9700", FreqOffset: 5, FreqBytes: 5},
+	0xA4: {Name: "IC-705", FreqOffset: 5, FreqBytes: 5},
+	0x94: {Name: "IC-7300", FreqOffset: 5, FreqBytes: 5},
+	0x8E: {Name: "IC-7851", FreqOffset: 5, FreqBytes: 5},
+	0xB6: {Name: "IC-7300MK2", FreqOffset: 5, FreqBytes: 5},
+	0xA6: {Name: "ID-52", FreqOffset: 5, FreqBytes: 5},
+	0x74: {Name: "IC-7700", FreqOffset: 5, FreqBytes: 5},
+	0x6A: {Name: "IC-7800", FreqOffset: 5, FreqBytes: 5},
+	0x80: {Name: "IC-7410", FreqOffset: 5, FreqBytes: 5},
+	0x98: {Name: "IC-7610", FreqOffset: 5, FreqBytes: 5},
+	0xb2: {Name: "IC-7610", FreqOffset: 5, FreqBytes: 5},
 }
 
 var rigState = &RigState{}
@@ -377,7 +421,7 @@ func handleCIVForPort(index int, b []byte) {
 
 // parseCIVFrameForPort parses CI-V frame for a specific port
 func parseCIVFrameForPort(index int, f []byte) {
-	//log.Printf("CI-V PORT %d RAW: % X (len=%d)", index, f, len(f))
+	log.Printf("CI-V PORT %d RAW: % X (len=%d)", index, f, len(f))
 	if len(f) < 7 {
 		return
 	}
@@ -438,6 +482,7 @@ func parseCIVFrame(f []byte) {
 
 // parseCIVFreq parses the given byte slice as a CI-V frequency frame.
 // It expects the frame to be in the format of BCD, little endian.
+// Supports rig-specific frequency data offsets based on flrig analysis.
 // The function will return 0 if the frame is invalid.
 // The function will return the parsed frequency in Hz otherwise.
 func parseCIVFreq(f []byte) int64 {
@@ -446,12 +491,33 @@ func parseCIVFreq(f []byte) int64 {
 		return 0
 	}
 
-	end := len(f) - 1 // FD
-	data := f[5:end]  // CMD の次から FD 手前
+	// Get CI-V address from frame (f[3] is the 'from' address)
+	address := f[3]
+
+	// Default values (most common: p+5, 5 bytes)
+	freqOffset := 5
+	freqBytes := 5
+
+	// Check if we have rig-specific info in database
+	if rigInfo, ok := civRigDatabase[address]; ok {
+		freqOffset = rigInfo.FreqOffset
+		freqBytes = rigInfo.FreqBytes
+	}
+
+	// Validate frame length
+	end := len(f) - 1 // FD position
+	if freqOffset+freqBytes > end {
+		// Frame too short for expected data
+		return 0
+	}
+
+	// Extract frequency data based on rig-specific offset
+	data := f[freqOffset : freqOffset+freqBytes]
 
 	var hz int64
 	mul := int64(1)
 
+	// Parse BCD (little endian)
 	for i := 0; i < len(data); i++ {
 		lo := int64(data[i] & 0x0F)
 		hi := int64((data[i] >> 4) & 0x0F)
@@ -835,28 +901,35 @@ func parseIF(cmd string) {
 }
 
 // parseCATFreq parses the given string as a CAT frequency frame.
-// It expects the frame to be in the format of "FA" followed by a 9-digit frequency in Hz.
-// The function will return 0 if the frame is invalid.
-// The function will return the parsed frequency in Hz otherwise.
+// Supports precision correction for different rig models based on digit count:
+// - 8 digits (FT-817, FT-857, FT-897): 10Hz precision, multiplied by 10 for 1Hz
+// - 9 digits (FT-991A, FT-710): 1Hz precision
+// - 11 digits (TS-590S, TS-2000, KENWOOD): 1Hz precision
 func parseCATFreq(s string) int64 {
-	// FA00014074000
+	// FA00014074000 (9 digits) or FA14074000 (8 digits) or FA00014074000 (11 digits)
 	if len(s) < 5 {
 		return 0
 	}
+
+	// Count digits in frequency string
+	freqStr := s[2:]
+	digitCount := 0
 	var hz int64
-	_ = binary.Read(
-		strings.NewReader(s[2:]),
-		binary.BigEndian,
-		&hz,
-	)
-	// 上記は簡易。実際は atoi が安全
-	hz = 0
-	for _, c := range s[2:] {
+
+	for _, c := range freqStr {
 		if c < '0' || c > '9' {
 			break
 		}
 		hz = hz*10 + int64(c-'0')
+		digitCount++
 	}
+
+	// Apply precision correction for 8-digit rigs (FT-817, FT-857, FT-897)
+	// These rigs use 10Hz precision, so multiply by 10 to get 1Hz precision
+	if digitCount == 8 {
+		hz *= 10
+	}
+
 	return hz
 }
 
