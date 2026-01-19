@@ -126,6 +126,9 @@ func startBridge() {
 		b, _ := json.Marshal(payload)
 		broadcast(string(b))
 
+		// Logbookへ非同期送信
+		go submitLogbookAsync(adif)
+
 	}
 }
 

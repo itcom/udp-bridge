@@ -466,7 +466,7 @@ func handleCIVForPort(index int, b []byte) {
 
 // parseCIVFrameForPort parses CI-V frame for a specific port
 func parseCIVFrameForPort(index int, f []byte) {
-	log.Printf("CI-V PORT %d RAW: % X (len=%d)", index, f, len(f))
+	//log.Printf("CI-V PORT %d RAW: % X (len=%d)", index, f, len(f))
 	if len(f) < 7 {
 		return
 	}
@@ -1111,9 +1111,9 @@ func broadcastRigState() {
 	lastBroadcast.Proto = rigState.Proto
 
 	ev := map[string]interface{}{
-		"type":  "rig",
-		"rig":   rigState.Proto,
-		"port":  rigState.Index,
+		"type": "rig",
+		"rig":  rigState.Proto,
+		"port": rigState.Index,
 	}
 
 	if rigState.Freq > 0 {

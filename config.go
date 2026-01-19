@@ -28,6 +28,25 @@ type Config struct {
 	RigPorts         []RigPortConfig `json:"rig_ports"`
 	RigBroadcastMode string          `json:"rig_broadcast_mode"` // "single" or "all"
 	SelectedRigIndex int             `json:"selected_rig_index"` // "single"モード時のインデックス
+
+	// Logbook連携
+	LogbookQRZAPIKey      string `json:"logbook_qrz_apikey"`
+	LogbookQRZEnabled     bool   `json:"logbook_qrz_enabled"`
+	LogbookHamQTHCallsign string `json:"logbook_hamqth_callsign"`
+	LogbookHamQTHUser     string `json:"logbook_hamqth_user"`
+	LogbookHamQTHPass     string `json:"logbook_hamqth_pass"`
+	LogbookHamQTHEnabled  bool   `json:"logbook_hamqth_enabled"`
+	LogbookEQSLUser       string `json:"logbook_eqsl_user"`
+	LogbookEQSLPass       string `json:"logbook_eqsl_pass"`
+	LogbookEQSLEnabled    bool   `json:"logbook_eqsl_enabled"`
+	LogbookHRDLogCallsign string `json:"logbook_hrdlog_callsign"`
+	LogbookHRDLogCode     string `json:"logbook_hrdlog_code"`
+	LogbookHRDLogEnabled  bool   `json:"logbook_hrdlog_enabled"`
+	LogbookClubLogEmail   string `json:"logbook_clublog_email"`
+	LogbookClubLogPass    string `json:"logbook_clublog_pass"`
+	LogbookClubLogCall    string `json:"logbook_clublog_callsign"`
+	LogbookClubLogAPI     string `json:"logbook_clublog_api"`
+	LogbookClubLogEnabled bool   `json:"logbook_clublog_enabled"`
 }
 
 var (

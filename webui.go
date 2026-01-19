@@ -289,6 +289,49 @@ button:hover {
         </div>
       </div>
     </div>
+    <div class="checkbox-group">
+      <div style="font-weight:600;margin-bottom:12px;color:#333;">📚 Logbook連携</div>
+      <label class="checkbox-item">
+        <input type="checkbox" name="logbook_qrz_enabled" {{if .Config.LogbookQRZEnabled}}checked{{end}}>
+        <span>QRZ.com Logbook</span>
+      </label>
+      <div class="form-group" style="margin-left:28px;">
+        <label for="logbook_qrz_apikey">API Key</label>
+        <input type="password" id="logbook_qrz_apikey" name="logbook_qrz_apikey" value="{{.Config.LogbookQRZAPIKey}}">
+      </div>
+      <label class="checkbox-item">
+        <input type="checkbox" name="logbook_hamqth_enabled" {{if .Config.LogbookHamQTHEnabled}}checked{{end}}>
+        <span>HamQTH</span>
+      </label>
+      <div class="form-group" style="margin-left:28px;">
+        <label for="logbook_hamqth_callsign">Callsign</label>
+        <input type="text" id="logbook_hamqth_callsign" name="logbook_hamqth_callsign" value="{{.Config.LogbookHamQTHCallsign}}">
+        <label for="logbook_hamqth_user">ユーザー名</label>
+        <input type="text" id="logbook_hamqth_user" name="logbook_hamqth_user" value="{{.Config.LogbookHamQTHUser}}">
+        <label for="logbook_hamqth_pass">パスワード</label>
+        <input type="password" id="logbook_hamqth_pass" name="logbook_hamqth_pass" value="{{.Config.LogbookHamQTHPass}}">
+      </div>
+      <label class="checkbox-item">
+        <input type="checkbox" name="logbook_eqsl_enabled" {{if .Config.LogbookEQSLEnabled}}checked{{end}}>
+        <span>eQSL.cc</span>
+      </label>
+      <div class="form-group" style="margin-left:28px;">
+        <label for="logbook_eqsl_user">ユーザー名</label>
+        <input type="text" id="logbook_eqsl_user" name="logbook_eqsl_user" value="{{.Config.LogbookEQSLUser}}">
+        <label for="logbook_eqsl_pass">パスワード</label>
+        <input type="password" id="logbook_eqsl_pass" name="logbook_eqsl_pass" value="{{.Config.LogbookEQSLPass}}">
+      </div>
+      <label class="checkbox-item">
+        <input type="checkbox" name="logbook_hrdlog_enabled" {{if .Config.LogbookHRDLogEnabled}}checked{{end}}>
+        <span>HRDLog.net</span>
+      </label>
+      <div class="form-group" style="margin-left:28px;">
+        <label for="logbook_hrdlog_callsign">Callsign</label>
+        <input type="text" id="logbook_hrdlog_callsign" name="logbook_hrdlog_callsign" value="{{.Config.LogbookHRDLogCallsign}}">
+        <label for="logbook_hrdlog_code">Upload Code</label>
+        <input type="password" id="logbook_hrdlog_code" name="logbook_hrdlog_code" value="{{.Config.LogbookHRDLogCode}}">
+      </div>
+    </div>
     <button type="submit">保存</button>
   </form>
   <div class="version">HAMLAB Bridge v0.4.0</div>
@@ -364,6 +407,21 @@ func startWebUI() {
 					config.SelectedRigIndex = idx
 				}
 			}
+
+			// Logbook連携設定
+			config.LogbookQRZEnabled = r.FormValue("logbook_qrz_enabled") != ""
+			config.LogbookQRZAPIKey = r.FormValue("logbook_qrz_apikey")
+			config.LogbookHamQTHEnabled = r.FormValue("logbook_hamqth_enabled") != ""
+			config.LogbookHamQTHCallsign = r.FormValue("logbook_hamqth_callsign")
+			config.LogbookHamQTHUser = r.FormValue("logbook_hamqth_user")
+			config.LogbookHamQTHPass = r.FormValue("logbook_hamqth_pass")
+			config.LogbookEQSLEnabled = r.FormValue("logbook_eqsl_enabled") != ""
+			config.LogbookEQSLUser = r.FormValue("logbook_eqsl_user")
+			config.LogbookEQSLPass = r.FormValue("logbook_eqsl_pass")
+			config.LogbookHRDLogEnabled = r.FormValue("logbook_hrdlog_enabled") != ""
+			config.LogbookHRDLogCallsign = r.FormValue("logbook_hrdlog_callsign")
+			config.LogbookHRDLogCode = r.FormValue("logbook_hrdlog_code")
+			// ClubLogは430ssb.net中継経由で実装予定（ペンディング）
 
 			// リグ設定の変更をチェック
 			rigSettingsChanged := false
