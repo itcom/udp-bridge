@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -23,11 +24,11 @@ func submitLogbookAsync(adif string) {
 	hrdlogEnabled := config.LogbookHRDLogEnabled
 	hrdlogCall := config.LogbookHRDLogCallsign
 	hrdlogCode := config.LogbookHRDLogCode
-	// clublogEnabled := config.LogbookClubLogEnabled
-	// clublogEmail := config.LogbookClubLogEmail
-	// clublogPass := config.LogbookClubLogPass
-	// clublogCall := config.LogbookClubLogCall
-	// clublogAPI := config.LogbookClubLogAPI
+	clublogEnabled := config.LogbookClubLogEnabled
+	clublogEmail := config.LogbookClubLogEmail
+	clublogPass := config.LogbookClubLogPass
+	clublogCall := config.LogbookClubLogCall
+	clublogAPI := config.LogbookClubLogAPI
 	configLock.RUnlock()
 
 	// QRZ Logbook
@@ -50,10 +51,10 @@ func submitLogbookAsync(adif string) {
 		go submitHRDLog(adif, hrdlogCall, hrdlogCode)
 	}
 
-	// ClubLog (430ssb.net中継経由で実装予定 - ペンディング)
-	// if clublogEnabled && clublogEmail != "" && clublogPass != "" && clublogCall != "" {
-	// 	go submitClubLog(adif, clublogEmail, clublogPass, clublogCall, clublogAPI)
-	// }
+	// ClubLog
+	if clublogEnabled && clublogEmail != "" && clublogPass != "" && clublogCall != "" {
+		go submitClubLog(adif, clublogEmail, clublogPass, clublogCall, clublogAPI)
+	}
 }
 
 // submitQRZLogbook はQRZ.com Logbookへ送信します
@@ -213,7 +214,21 @@ func submitClubLog(adif, email, password, callsign, apikey string) {
 
 	log.Println("[LOGBOOK] ClubLog: sending...")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// リダイレクト時にPOSTメソッドを維持するクライアントを作成
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// リダイレクト時にもPOSTメソッドとボディを維持
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			// 元のリクエストのメソッドとボディを保持
+			if len(via) > 0 {
+				req.Method = via[0].Method
+			}
+			return nil
+		},
+	}
 
 	values := url.Values{
 		"email":    {email},
@@ -222,21 +237,34 @@ func submitClubLog(adif, email, password, callsign, apikey string) {
 		"adif":     {adif},
 	}
 
-	// APIキーが設定されている場合のみ追加
+	// 送信先URL(APIキーの有無で切り替え)
+	var targetURL string
 	if strings.TrimSpace(apikey) != "" {
+		// APIキーが入力されている場合: ClubLogへ直接送信
 		values.Set("api", apikey)
+		targetURL = "https://clublog.org/realtime.php"
+		log.Println("[LOGBOOK] ClubLog: using direct API with apikey")
+	} else {
+		// APIキーが未入力の場合: 430ssb.net経由
+		targetURL = "https://www.430ssb.net/api/clublog/proxy"
+		log.Println("[LOGBOOK] ClubLog: using 430ssb.net proxy")
 	}
 
-	resp, err := client.PostForm("https://secure.clublog.org/realtime.php", values)
+	resp, err := client.PostForm(targetURL, values)
 	if err != nil {
 		log.Println("[LOGBOOK] ClubLog error:", err)
 		return
 	}
 	defer resp.Body.Close()
 
+	// レスポンスボディを読み取る
+	body := make([]byte, 1024)
+	n, _ := resp.Body.Read(body)
+	responseText := string(body[:n])
+
 	if resp.StatusCode == 200 {
-		log.Println("[LOGBOOK] ClubLog: success")
+		log.Printf("[LOGBOOK] ClubLog: success - response: %s", responseText)
 	} else {
-		log.Println("[LOGBOOK] ClubLog: failed, status:", resp.StatusCode)
+		log.Printf("[LOGBOOK] ClubLog: failed, status: %d, response: %s", resp.StatusCode, responseText)
 	}
 }

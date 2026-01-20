@@ -331,10 +331,24 @@ button:hover {
         <label for="logbook_hrdlog_code">Upload Code</label>
         <input type="password" id="logbook_hrdlog_code" name="logbook_hrdlog_code" value="{{.Config.LogbookHRDLogCode}}">
       </div>
+      <label class="checkbox-item">
+        <input type="checkbox" name="logbook_clublog_enabled" {{if .Config.LogbookClubLogEnabled}}checked{{end}}>
+        <span>ClubLog</span>
+      </label>
+      <div class="form-group" style="margin-left:28px;">
+        <label for="logbook_clublog_email">Email</label>
+        <input type="text" id="logbook_clublog_email" name="logbook_clublog_email" value="{{.Config.LogbookClubLogEmail}}">
+        <label for="logbook_clublog_pass">Password</label>
+        <input type="password" id="logbook_clublog_pass" name="logbook_clublog_pass" value="{{.Config.LogbookClubLogPass}}">
+        <label for="logbook_clublog_callsign">Callsign</label>
+        <input type="text" id="logbook_clublog_callsign" name="logbook_clublog_callsign" value="{{.Config.LogbookClubLogCall}}">
+        <label for="logbook_clublog_api">API Key (オプション)</label>
+        <input type="password" id="logbook_clublog_api" name="logbook_clublog_api" value="{{.Config.LogbookClubLogAPI}}" placeholder="未入力時は430ssb.net経由">
+      </div>
     </div>
     <button type="submit">保存</button>
   </form>
-  <div class="version">HAMLAB Bridge v0.4.0</div>
+  <div class="version">HAMLAB Bridge v0.4.2</div>
 </div>
 </body>
 </html>
@@ -421,7 +435,11 @@ func startWebUI() {
 			config.LogbookHRDLogEnabled = r.FormValue("logbook_hrdlog_enabled") != ""
 			config.LogbookHRDLogCallsign = r.FormValue("logbook_hrdlog_callsign")
 			config.LogbookHRDLogCode = r.FormValue("logbook_hrdlog_code")
-			// ClubLogは430ssb.net中継経由で実装予定（ペンディング）
+			config.LogbookClubLogEnabled = r.FormValue("logbook_clublog_enabled") != ""
+			config.LogbookClubLogEmail = r.FormValue("logbook_clublog_email")
+			config.LogbookClubLogPass = r.FormValue("logbook_clublog_pass")
+			config.LogbookClubLogCall = r.FormValue("logbook_clublog_callsign")
+			config.LogbookClubLogAPI = r.FormValue("logbook_clublog_api")
 
 			// リグ設定の変更をチェック
 			rigSettingsChanged := false
