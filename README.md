@@ -4,6 +4,8 @@ WSJT-X / JTDX から送信される UDP ADIF データを受信し、WebSocket �
 
 [HAMLAB](https://hamlab.jp) の交信登録を自動化するための基盤として動作します。
 
+![HAMLAB と HAMLAB Bridge 設定画面](docs/screenshot.png)
+
 ## 概要
 
 ```
@@ -123,15 +125,17 @@ macOS 向け DMG 作成：
 
 ## 起動後のサービス
 
-| サービス | アドレス |
-|---------|---------|
-| UDP 受信 | 127.0.0.1:2333 |
-| WebSocket | ws://127.0.0.1:17800/ws |
-| 設定画面 | http://127.0.0.1:17801/settings |
+| サービス  | アドレス                        |
+| --------- | ------------------------------- |
+| UDP 受信  | 127.0.0.1:2333                  |
+| WebSocket | ws://127.0.0.1:17800/ws         |
+| 設定画面  | http://127.0.0.1:17801/settings |
 
 ## 設定
 
 設定画面 (http://127.0.0.1:17801/settings) で各種設定を変更できます。すべての設定は保存後に即座に反映されます。
+
+![設定画面（QRZ.com / JCC）](docs/settings-qrz.png)
 
 ### 自動再接続が実行される設定
 
@@ -166,13 +170,15 @@ macOS 向け DMG 作成：
 
 設定画面から無線機の CAT / CI-V 接続を有効にすると、周波数とモードをリアルタイムで取得できます。
 
+![設定画面（無線機連携）](docs/settings-rig.png)
+
 ### 対応プロトコル
 
-| メーカー | プロトコル | 確認済み機種 |
-|---------|-----------|-------------|
-| ICOM | CI-V | IC-705, IC-7300 等 |
-| YAESU | CAT | FT-991A, FT-710 等 |
-| KENWOOD | CAT | TS-590 等 |
+| メーカー | プロトコル | 確認済み機種       |
+| -------- | ---------- | ------------------ |
+| ICOM     | CI-V       | IC-705, IC-7300 等 |
+| YAESU    | CAT        | FT-991A, FT-710 等 |
+| KENWOOD  | CAT        | TS-590 等          |
 
 ### リグ側のボーレート設定
 
@@ -186,10 +192,10 @@ macOS 向け DMG 作成：
 
 #### ブロードキャストモード
 
-| モード | 動作 |
-|--------|------|
-| all | すべての無線機から受信したデータを配信 |
-| single | 選択した1台の無線機のみ配信 |
+| モード | 動作                                   |
+| ------ | -------------------------------------- |
+| all    | すべての無線機から受信したデータを配信 |
+| single | 選択した1台の無線機のみ配信            |
 
 - **all モード**: 複数の無線機を切り替えながら運用する場合に便利です。最後に操作した無線機の情報が配信されます。
 - **single モード**: 特定の無線機のみをモニターしたい場合に使用します。
@@ -223,15 +229,26 @@ YAESU / KENWOOD の CAT プロトコルでは、AI1 コマンドにより無線�
 
 > **Note**: PTY ルーターは macOS / Linux でのみ利用可能です。
 
-## QRZ.com 連携
+## Logbook 連携
 
 設定画面 (http://127.0.0.1:17801/settings) から QRZ.com のユーザー名・パスワードを設定すると、以下が自動補完されます。
+
+![設定画面（Logbook連携）](docs/settings-logbook.png)
 
 - Operator（NAME）
 - QTH
 - Grid Locator（6桁以上のみ）
 
 > **Note**: QRZ.com の API を利用するには「**XML Logbook Data Subscription**」以上のプランが必要です。無料プランでは利用できません。
+
+QRZ.com Logbook 以外にも、以下の Logbook サービスへ交信ログを自動 POST できます：
+
+- [HamQTH](https://www.hamqth.com/)
+- [eQSL.cc](https://www.eqsl.cc/)
+- [HRDLog.net](https://www.hrdlog.net/)
+- [ClubLog](https://clublog.org/)
+
+各サービスの認証情報は設定画面から個別に設定してください。
 
 ## 出力データ形式
 
