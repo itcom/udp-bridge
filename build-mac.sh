@@ -2,7 +2,7 @@
 set -e
 
 APP_NAME="HAMLAB Bridge"
-VERSION="0.1.0"
+VERSION="0.5.0"
 
 APP_DIR="dist/${APP_NAME}.app"
 DMG_DIR="dmg"

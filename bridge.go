@@ -22,8 +22,16 @@ var qrzc = newQRZCache(24 * time.Hour)
 // The UDP server listens for incoming WSJT-X/JTDX messages and broadcasts them to connected WebSocket clients.
 func startBridge() {
 
-	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:2333")
-	conn, _ := net.ListenUDP("udp", addr)
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:2333")
+	if err != nil {
+		log.Printf("[BRIDGE] UDP resolve error: %v", err)
+		return
+	}
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		log.Printf("[BRIDGE] UDP listen error (port 2333 already in use?): %v", err)
+		return
+	}
 	defer conn.Close()
 
 	buf := make([]byte, 4096)

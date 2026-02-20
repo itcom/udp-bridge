@@ -7,7 +7,7 @@ qrz_cache.json
 # Binaries
 hamlab-bridge
 hamlab-bridge.exe
-HAMLAB-Bridge-0.1.0.dmg
+HAMLAB-Bridge-*.dmg
 hamlab-menubar
 
 # OS

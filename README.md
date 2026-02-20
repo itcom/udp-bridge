@@ -357,6 +357,56 @@ WebSocket クライアントから無線機の状態を能動的に取得でき�
 }
 ```
 
+### WebSocket からの周波数・モード設定
+
+WebSocket クライアントから無線機の周波数やモードを設定できます。
+
+#### 周波数の設定
+
+```json
+{
+  "type": "setFreq",
+  "port": 0,
+  "freq": 14074000
+}
+```
+
+- `port`: 無線機のポート番号（省略時は 0）
+- `freq`: 周波数（Hz 単位）
+
+**レスポンス:**
+
+```json
+{"type": "setFreqResult", "success": true}
+```
+
+#### モードの設定
+
+```json
+{
+  "type": "setMode",
+  "port": 0,
+  "mode": "USB",
+  "data": true
+}
+```
+
+- `port`: 無線機のポート番号（省略時は 0）
+- `mode`: モード名（USB, LSB, CW, FM, AM, RTTY, DV 等）
+- `data`: DATA モードの ON/OFF（省略時は false）
+
+**レスポンス:**
+
+```json
+{"type": "setModeResult", "success": true}
+```
+
+**エラー時:**
+
+```json
+{"type": "setFreqResult", "success": false, "error": "port 0 not found or not connected"}
+```
+
 ## トラブルシューティング
 
 ### アプリが開けない（macOS）

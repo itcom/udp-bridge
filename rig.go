@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"runtime"
 	"strings"
@@ -1075,6 +1076,206 @@ func SendAI1() {
 		_, _ = currentRigPort.Write([]byte("AI1;FA;MD0;"))
 		log.Println("[RIG] AI1; sent (settings changed)")
 	}
+}
+
+// ---- WebSocket → Rig set commands ----
+
+// SetRigFreq sets the frequency on the rig connected to the given port.
+// freqHz is the frequency in Hz (e.g. 14074000 for 14.074 MHz).
+func SetRigFreq(portIndex int, freqHz int64) error {
+	// Get serial port
+	currentRigPortsMu.Lock()
+	s, exists := currentRigPorts[portIndex]
+	currentRigPortsMu.Unlock()
+	if !exists || s == nil {
+		return fmt.Errorf("port %d not found or not connected", portIndex)
+	}
+
+	// Get protocol for this port
+	rigStatesMu.RLock()
+	state := rigStates[portIndex]
+	var proto RigProto
+	if state != nil {
+		proto = state.Proto
+	}
+	rigStatesMu.RUnlock()
+
+	switch proto {
+	case ProtoCAT:
+		// YAESU 9桁形式（FA014074000;）
+		cmd := fmt.Sprintf("FA%09d;", freqHz)
+		_, err := s.Write([]byte(cmd))
+		if err != nil {
+			return fmt.Errorf("CAT write error: %v", err)
+		}
+		log.Printf("[RIG-%d] setFreq: %s", portIndex, cmd)
+
+	case ProtoCIV:
+		// CI-V: FE FE [to] [from] 05 [BCD 5bytes LE] FD
+		bcd := freqToCIVBCD(freqHz)
+		frame := []byte{0xFE, 0xFE, 0x00, 0xE0, 0x05}
+		frame = append(frame, bcd...)
+		frame = append(frame, 0xFD)
+		_, err := s.Write(frame)
+		if err != nil {
+			return fmt.Errorf("CI-V write error: %v", err)
+		}
+		log.Printf("[RIG-%d] setFreq CI-V: % X", portIndex, frame)
+
+	default:
+		return fmt.Errorf("protocol not detected for port %d", portIndex)
+	}
+
+	return nil
+}
+
+// SetRigMode sets the mode on the rig connected to the given port.
+func SetRigMode(portIndex int, mode string, data bool) error {
+	// Get serial port
+	currentRigPortsMu.Lock()
+	s, exists := currentRigPorts[portIndex]
+	currentRigPortsMu.Unlock()
+	if !exists || s == nil {
+		return fmt.Errorf("port %d not found or not connected", portIndex)
+	}
+
+	// Get protocol for this port
+	rigStatesMu.RLock()
+	state := rigStates[portIndex]
+	var proto RigProto
+	if state != nil {
+		proto = state.Proto
+	}
+	rigStatesMu.RUnlock()
+
+	switch proto {
+	case ProtoCAT:
+		code, err := modeToCATCode(mode, data)
+		if err != nil {
+			return err
+		}
+		cmd := fmt.Sprintf("MD%s;", code)
+		_, werr := s.Write([]byte(cmd))
+		if werr != nil {
+			return fmt.Errorf("CAT write error: %v", werr)
+		}
+		log.Printf("[RIG-%d] setMode: %s", portIndex, cmd)
+
+	case ProtoCIV:
+		modeByte, dataByte, err := modeToCIVBytes(mode, data)
+		if err != nil {
+			return err
+		}
+		// CI-V: FE FE [to] [from] 06 [mode] [data] FD
+		frame := []byte{0xFE, 0xFE, 0x00, 0xE0, 0x06, modeByte, dataByte, 0xFD}
+		_, werr := s.Write(frame)
+		if werr != nil {
+			return fmt.Errorf("CI-V write error: %v", werr)
+		}
+		log.Printf("[RIG-%d] setMode CI-V: % X", portIndex, frame)
+
+	default:
+		return fmt.Errorf("protocol not detected for port %d", portIndex)
+	}
+
+	return nil
+}
+
+// freqToCIVBCD converts a frequency in Hz to CI-V BCD format (5 bytes, little endian).
+func freqToCIVBCD(hz int64) []byte {
+	bcd := make([]byte, 5)
+	for i := 0; i < 5; i++ {
+		lo := byte(hz % 10)
+		hz /= 10
+		hi := byte(hz % 10)
+		hz /= 10
+		bcd[i] = (hi << 4) | lo
+	}
+	return bcd
+}
+
+// modeToCATCode converts a mode string and data flag to a CAT MD command code.
+// Returns the 2-character code (e.g. "02" for USB).
+func modeToCATCode(mode string, data bool) (string, error) {
+	upper := strings.ToUpper(mode)
+
+	// DATA モード
+	if data {
+		switch upper {
+		case "LSB":
+			return "08", nil
+		case "USB":
+			return "0C", nil
+		case "FM":
+			return "0A", nil
+		case "RTTY-USB":
+			return "09", nil
+		}
+	}
+
+	// 通常モード
+	switch upper {
+	case "LSB":
+		return "01", nil
+	case "USB":
+		return "02", nil
+	case "CW", "CW-U":
+		return "03", nil
+	case "FM":
+		return "04", nil
+	case "AM":
+		return "05", nil
+	case "RTTY-LSB", "RTTY":
+		return "06", nil
+	case "CW-R":
+		return "07", nil
+	case "FM-N":
+		return "0B", nil
+	case "AM-N":
+		return "0D", nil
+	case "C4FM":
+		return "0E", nil
+	default:
+		return "", fmt.Errorf("unsupported CAT mode: %s", mode)
+	}
+}
+
+// modeToCIVBytes converts a mode string and data flag to CI-V mode/data bytes.
+func modeToCIVBytes(mode string, data bool) (modeByte byte, dataByte byte, err error) {
+	upper := strings.ToUpper(mode)
+
+	switch upper {
+	case "LSB":
+		modeByte = 0x00
+	case "USB":
+		modeByte = 0x01
+	case "AM":
+		modeByte = 0x02
+	case "CW":
+		modeByte = 0x03
+	case "RTTY":
+		modeByte = 0x04
+	case "FM":
+		modeByte = 0x05
+	case "WFM":
+		modeByte = 0x06
+	case "CW-R":
+		modeByte = 0x07
+	case "RTTY-R":
+		modeByte = 0x08
+	case "DV":
+		modeByte = 0x17
+	default:
+		return 0, 0, fmt.Errorf("unsupported CI-V mode: %s", mode)
+	}
+
+	if data {
+		dataByte = 0x01
+	} else {
+		dataByte = 0x00
+	}
+
+	return modeByte, dataByte, nil
 }
 
 // Broadcast the current rig state to all connected WebSocket clients.

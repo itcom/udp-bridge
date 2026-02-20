@@ -134,6 +134,73 @@ func handleClientMessages(c *websocket.Conn) {
 				if responseBytes, err := json.Marshal(response); err == nil {
 					c.WriteMessage(websocket.TextMessage, responseBytes)
 				}
+
+			case "setFreq":
+				portIndex := 0
+				if idx, ok := req["port"].(float64); ok {
+					portIndex = int(idx)
+				}
+				freq := int64(0)
+				if f, ok := req["freq"].(float64); ok {
+					freq = int64(f)
+				}
+
+				var response map[string]interface{}
+				if freq <= 0 {
+					response = map[string]interface{}{
+						"type":    "setFreqResult",
+						"success": false,
+						"error":   "freq is required and must be > 0",
+					}
+				} else if err := SetRigFreq(portIndex, freq); err != nil {
+					response = map[string]interface{}{
+						"type":    "setFreqResult",
+						"success": false,
+						"error":   err.Error(),
+					}
+				} else {
+					response = map[string]interface{}{
+						"type":    "setFreqResult",
+						"success": true,
+					}
+				}
+				if responseBytes, err := json.Marshal(response); err == nil {
+					c.WriteMessage(websocket.TextMessage, responseBytes)
+				}
+
+			case "setMode":
+				portIndex := 0
+				if idx, ok := req["port"].(float64); ok {
+					portIndex = int(idx)
+				}
+				mode, _ := req["mode"].(string)
+				dataFlag := false
+				if d, ok := req["data"].(bool); ok {
+					dataFlag = d
+				}
+
+				var response map[string]interface{}
+				if mode == "" {
+					response = map[string]interface{}{
+						"type":    "setModeResult",
+						"success": false,
+						"error":   "mode is required",
+					}
+				} else if err := SetRigMode(portIndex, mode, dataFlag); err != nil {
+					response = map[string]interface{}{
+						"type":    "setModeResult",
+						"success": false,
+						"error":   err.Error(),
+					}
+				} else {
+					response = map[string]interface{}{
+						"type":    "setModeResult",
+						"success": true,
+					}
+				}
+				if responseBytes, err := json.Marshal(response); err == nil {
+					c.WriteMessage(websocket.TextMessage, responseBytes)
+				}
 			}
 		}
 	}
